@@ -3,30 +3,14 @@
 Stage1スクリーニング(SPECIFICATION.md 2節)の候補発掘に使う、軽量なランキングデータの
 取得元。kabutan.jp/tansaku/ 配下の各種ランキングページに対応する。
 """
-import re
-
 from bs4 import BeautifulSoup
 
 from .http_client import create_session
+from .ranking_common import clean_numeric, is_regular_stock_code
 
 TANSAKU_URL = "https://kabutan.jp/tansaku/"
 VOLUME_SURGE_MODE = "2_0311"
 REQUEST_TIMEOUT = 10
-
-# 新市場区分の5桁ETF/ETNコード等は需給分析の対象外なので、4桁の通常株式コードのみ拾う
-_CODE_RE = re.compile(r"^\d{4}$")
-
-
-def _clean_numeric(text: str):
-    if not text:
-        return None
-    text = text.replace(",", "").replace("+", "").strip()
-    if text in ("－", "-", ""):
-        return None
-    try:
-        return float(text)
-    except ValueError:
-        return None
 
 
 def _parse_ranking_table(html: str) -> list[dict]:
@@ -49,19 +33,20 @@ def _parse_ranking_table(html: str) -> list[dict]:
         if len(cells) < 13:
             continue
         code = cells[0].get_text(strip=True)
-        if not _CODE_RE.match(code):
-            continue
+        market = cells[2].get_text(strip=True)
+        if not is_regular_stock_code(code, market):
+            continue  # ETF/ETN/REIT等は除外(投資信託類が出来高急増で頻出するため)
         records.append({
             "code": code,
             "name": cells[1].get_text(strip=True),
-            "market": cells[2].get_text(strip=True),
-            "price": _clean_numeric(cells[5].get_text(strip=True)),
-            "price_change": _clean_numeric(cells[7].get_text(strip=True)),
-            "volume": _clean_numeric(cells[8].get_text(strip=True)),
-            "volume_change_pct": _clean_numeric(cells[9].get_text(strip=True)),
-            "per": _clean_numeric(cells[10].get_text(strip=True)),
-            "pbr": _clean_numeric(cells[11].get_text(strip=True)),
-            "yield_val": _clean_numeric(cells[12].get_text(strip=True)),
+            "market": market,
+            "price": clean_numeric(cells[5].get_text(strip=True)),
+            "price_change": clean_numeric(cells[7].get_text(strip=True)),
+            "volume": clean_numeric(cells[8].get_text(strip=True)),
+            "volume_change_pct": clean_numeric(cells[9].get_text(strip=True)),
+            "per": clean_numeric(cells[10].get_text(strip=True)),
+            "pbr": clean_numeric(cells[11].get_text(strip=True)),
+            "yield_val": clean_numeric(cells[12].get_text(strip=True)),
         })
     return records
 

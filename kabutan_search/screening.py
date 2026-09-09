@@ -6,15 +6,16 @@
 候補の発掘元:
   1. お気に入り・保有ポジション銘柄(常時監視対象)
   2. 株探「出来高急増銘柄」ランキング(tansaku.py) — 玉集めの兆候を検知
-  3. JPX公式の週次信用取引残高データ(jpx_margin_positions) — 信用倍率が低い(売り長=
-     踏み上げ期待)銘柄。株探にサイト全体の信用倍率ランキングページが見当たらなかったため、
-     kabutan.jpに一切アクセスしないこちらを採用(要: 事前に `jpx-sync` コマンドでの取得)
-  4. セクターランキング(sector_data_manager) + 既知の直近株価データ — 所属セクターが
+  3. 株探「株価注意報」の信用残ランキング(margin_ranking.py) — 信用売り残減少(踏み上げ
+     進行中)・信用期日到来銘柄(強制的な売買圧力)
+  4. JPX公式の週次信用取引残高データ(jpx_margin_positions) — 信用倍率が低い(売り長=
+     踏み上げ期待)銘柄。kabutan.jpに一切アクセスしない(要: 事前に `jpx-sync` コマンド)
+  5. セクターランキング(sector_data_manager) + 既知の直近株価データ — 所属セクターが
      好調で、かつ既に把握している騰落率が高い銘柄
 """
 from datetime import datetime
 
-from . import sector_data_manager, tansaku
+from . import margin_ranking, sector_data_manager, tansaku
 from .database import Database
 from .nikkei_database import NikkeiDatabase
 from .sector_divergence_analyzer import calculate_sector_divergence
@@ -32,6 +33,7 @@ def screen(
     nikkei_db: NikkeiDatabase | None = None,
     fetch_sectors: bool = True,
     include_volume_surge: bool = True,
+    include_margin_ranking: bool = True,
     include_low_margin_ratio: bool = True,
 ) -> list[dict]:
     """当日の値上がり優位性候補を抽出し、candidate_stocksテーブルへ保存して返す。"""
@@ -66,7 +68,32 @@ def screen(
                 "reason": f"出来高急増(前日比+{vol_chg:.0f}%): 玉集めの兆候",
             }
 
-    # 3. JPX公式データ: 信用倍率が低い銘柄(売り長=踏み上げ期待)
+    # 3. 信用売り残減少ランキング(踏み上げ進行中) + 信用期日到来銘柄(強制的な売買圧力)
+    if include_margin_ranking:
+        for rec in margin_ranking.fetch_ranking(margin_ranking.MODE_SHORT_DECREASE):
+            code = rec["code"]
+            if code in candidates:
+                continue
+            ratio = rec["margin_ratio"]
+            ratio_str = f"{ratio:.2f}倍" if ratio is not None else "--"
+            candidates[code] = {
+                "code": code,
+                "screening_score": 700.0,
+                "reason": f"信用売り残減少中(信用倍率{ratio_str}): 踏み上げ進行中",
+            }
+
+        for mode, label in ((margin_ranking.MODE_DUE_HIGH, "高値"), (margin_ranking.MODE_DUE_LOW, "安値")):
+            for rec in margin_ranking.fetch_ranking(mode):
+                code = rec["code"]
+                if code in candidates:
+                    continue
+                candidates[code] = {
+                    "code": code,
+                    "screening_score": 600.0,
+                    "reason": f"信用期日到来({label}基準): 強制的な売買圧力の可能性",
+                }
+
+    # 4. JPX公式データ: 信用倍率が低い銘柄(売り長=踏み上げ期待)
     if include_low_margin_ratio and nikkei_db is not None:
         for pos in nikkei_db.get_low_margin_ratio_positions(max_ratio=MAX_MARGIN_RATIO):
             code = pos["code"]
@@ -79,7 +106,7 @@ def screen(
                 "reason": f"JPX信用倍率{ratio:.2f}倍(売り長=踏み上げ期待)",
             }
 
-    # 4. セクターモメンタム + 既知の値上がり率
+    # 5. セクターモメンタム + 既知の値上がり率
     for code in db.get_distinct_stock_codes():
         if code in candidates:
             continue

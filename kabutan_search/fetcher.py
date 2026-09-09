@@ -36,7 +36,8 @@ def fetch_stock(db: Database, code: str, session=None) -> dict:
             f"株探への接続が拒否されました(HTTP {top_resp.status_code})。Bot対策の可能性があります。"
             "しばらく時間をおいて再試行してください。"
         )
-    top_resp.raise_for_status()
+    if top_resp.status_code != 200:
+        raise ValueError(f"{code}: ページ取得に失敗しました(HTTP {top_resp.status_code})。")
 
     if parser.is_rate_limited(top_resp.text):
         raise RateLimitedError("株探のアクセス制限ページを検知しました。しばらく待ってから再試行してください。")
