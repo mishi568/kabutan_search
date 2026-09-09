@@ -3,16 +3,18 @@
 詳細データ(信用残・決算等)を取得する前に、軽量なデータだけで値上がり優位性のある銘柄を
 絞り込む。SPECIFICATION.md 2節(2段階データ収集フロー)に対応する。
 
-現状の実装は「セクターランキング(sector_data_manager、既に軽量取得済み)」と
-「既知の直近株価データ(過去に取得済みのstock_records)」のみを使った判定。
-個別銘柄の値上がり率ランキングページのスクレイピングは未実装
-(SPECIFICATION.md 8節の未確定事項: 対象ページのURLが未確定のため)。
-そのページが決まり次第、_screen_by_ranking_page() のようなソースを追加して
-候補選定の精度を上げられる。
+候補の発掘元:
+  1. お気に入り・保有ポジション銘柄(常時監視対象)
+  2. 株探「出来高急増銘柄」ランキング(tansaku.py) — 玉集めの兆候を検知
+  3. セクターランキング(sector_data_manager) + 既知の直近株価データ — 所属セクターが
+     好調で、かつ既に把握している騰落率が高い銘柄
+
+「信用倍率が低い(売り長=踏み上げ期待)」ランキングは対象ページ未確定のため未実装
+(SPECIFICATION.md 8節)。ページが決まり次第、同様のソースとして追加できる。
 """
 from datetime import datetime
 
-from . import sector_data_manager
+from . import sector_data_manager, tansaku
 from .database import Database
 from .sector_divergence_analyzer import calculate_sector_divergence
 
@@ -22,14 +24,8 @@ HOT_SECTOR_SIGNAL_RANKS = (1, 2)
 MIN_PRICE_CHANGE_PCT = 3.0
 
 
-def screen(db: Database, fetch_sectors: bool = True) -> list[dict]:
-    """当日の値上がり優位性候補を抽出し、candidate_stocksテーブルへ保存して返す。
-
-    候補となる条件(いずれか):
-      1. お気に入り・保有ポジション銘柄 (常時Stage2監視対象。値上がり判定は不問)
-      2. 直近の株価データが既にあり、所属セクターが「踏み上げ初動/モメンタム急騰」で、
-         かつ直近の騰落率がMIN_PRICE_CHANGE_PCT以上
-    """
+def screen(db: Database, fetch_sectors: bool = True, include_volume_surge: bool = True) -> list[dict]:
+    """当日の値上がり優位性候補を抽出し、candidate_stocksテーブルへ保存して返す。"""
     today = datetime.now().strftime("%Y-%m-%d")
 
     if fetch_sectors:
@@ -40,13 +36,28 @@ def screen(db: Database, fetch_sectors: bool = True) -> list[dict]:
 
     candidates: dict[str, dict] = {}
 
+    # 1. 常時監視対象(お気に入り・ポジション)
     for code in db.get_tracked_codes():
-        candidates[code] = {"code": code, "screening_score": 100.0, "reason": "お気に入り登録銘柄(常時監視)"}
+        candidates[code] = {"code": code, "screening_score": 1000.0, "reason": "お気に入り登録銘柄(常時監視)"}
     for pos in db.list_positions():
         candidates.setdefault(
-            pos["code"], {"code": pos["code"], "screening_score": 100.0, "reason": "保有ポジション銘柄(常時監視)"}
+            pos["code"], {"code": pos["code"], "screening_score": 1000.0, "reason": "保有ポジション銘柄(常時監視)"}
         )
 
+    # 2. 出来高急増ランキング(玉集めの兆候)
+    if include_volume_surge:
+        for rec in tansaku.fetch_volume_surge():
+            code = rec["code"]
+            if code in candidates:
+                continue
+            vol_chg = rec["volume_change_pct"] or 0.0
+            candidates[code] = {
+                "code": code,
+                "screening_score": vol_chg,
+                "reason": f"出来高急増(前日比+{vol_chg:.0f}%): 玉集めの兆候",
+            }
+
+    # 3. セクターモメンタム + 既知の値上がり率
     for code in db.get_distinct_stock_codes():
         if code in candidates:
             continue
