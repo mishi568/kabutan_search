@@ -10,12 +10,9 @@ import requests
 from bs4 import BeautifulSoup
 
 from .database import Database
+from .fetcher import DEFAULT_HEADERS
 
 SECTOR_RANKING_URL = "https://kabutan.jp/warning/?mode=9_1"
-USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-)
 REQUEST_TIMEOUT = 10
 
 
@@ -88,7 +85,8 @@ def fetch_sector_ranking(
 ) -> list[dict]:
     """kabutan.jp/warning/?mode=9_1 の全ページを取得し、DBに保存して返す"""
     session = session or requests.Session()
-    session.headers.setdefault("User-Agent", USER_AGENT)
+    for key, value in DEFAULT_HEADERS.items():
+        session.headers.setdefault(key, value)
 
     all_records: list[dict] = []
     detected_date = custom_date
