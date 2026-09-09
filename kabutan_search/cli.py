@@ -6,7 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import edinet_holdings_fetcher, gemini_prompt, margin_analysis, report, screening, sector_data_manager, tracker
+from . import edinet_holdings_fetcher, fetcher, gemini_prompt, margin_analysis, report, screening, sector_data_manager, tracker
 from .database import Database
 from .nikkei_database import NikkeiDatabase
 from .sector_divergence_analyzer import calculate_sector_divergence
@@ -14,6 +14,16 @@ from .sector_divergence_analyzer import calculate_sector_divergence
 
 def _databases(args: argparse.Namespace) -> tuple[Database, NikkeiDatabase]:
     return Database(args.db), NikkeiDatabase(args.nikkei_db)
+
+
+def cmd_fetch(args: argparse.Namespace) -> None:
+    db, _ = _databases(args)
+    try:
+        data = fetcher.fetch_stock(db, args.code)
+    except (fetcher.RateLimitedError, ValueError) as e:
+        print(str(e), file=sys.stderr)
+        return
+    print(f"{data['code']} {data['name']}: 株価{data['price']}円 を保存しました。")
 
 
 def cmd_sector(args: argparse.Namespace) -> None:
@@ -105,6 +115,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--nikkei-db", default="nikkei_data.db", help="nikkei_data.dbのパス")
 
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("fetch", help="個別銘柄ページを取得してDBに保存")
+    p.add_argument("code", help="4桁の証券コード")
+    p.set_defaults(func=cmd_fetch)
 
     p = sub.add_parser("sector", help="セクターランキングを取得しモメンタムを表示")
     p.set_defaults(func=cmd_sector)
