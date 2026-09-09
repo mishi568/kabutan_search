@@ -6,11 +6,10 @@ Stage1スクリーニング(SPECIFICATION.md 2節)の主要データソース。
 import re
 from datetime import datetime
 
-import requests
 from bs4 import BeautifulSoup
 
 from .database import Database
-from .fetcher import DEFAULT_HEADERS
+from .http_client import create_session
 
 SECTOR_RANKING_URL = "https://kabutan.jp/warning/?mode=9_1"
 REQUEST_TIMEOUT = 10
@@ -81,12 +80,10 @@ def fetch_sector_ranking(
     db: Database,
     custom_date: str | None = None,
     pages: tuple[int, ...] = (1, 2, 3),
-    session: requests.Session | None = None,
+    session=None,
 ) -> list[dict]:
     """kabutan.jp/warning/?mode=9_1 の全ページを取得し、DBに保存して返す"""
-    session = session or requests.Session()
-    for key, value in DEFAULT_HEADERS.items():
-        session.headers.setdefault(key, value)
+    session = session or create_session()
 
     all_records: list[dict] = []
     detected_date = custom_date
