@@ -11,6 +11,7 @@ DEFAULT_DB_PATH = Path("nikkei_data.db")
 
 NIKKEI_PER_RECORD_COLUMNS = {
     "date": "TEXT PRIMARY KEY",
+    "price": "REAL",
     "per": "REAL",
     "pbr": "REAL",
     "eps": "REAL",
@@ -19,6 +20,7 @@ NIKKEI_PER_RECORD_COLUMNS = {
 
 NIKKEI_TOURAKU_RECORD_COLUMNS = {
     "date": "TEXT PRIMARY KEY",
+    "price": "REAL",
     "touraku_6d": "REAL",
     "touraku_10_12d": "REAL",
     "touraku_25d": "REAL",
@@ -27,6 +29,7 @@ NIKKEI_TOURAKU_RECORD_COLUMNS = {
 
 NIKKEI_MARGIN_RECORD_COLUMNS = {
     "date": "TEXT PRIMARY KEY",
+    "price": "REAL",
     "margin_buy": "REAL",
     "margin_sell": "REAL",
     "margin_ratio": "REAL",
@@ -182,6 +185,19 @@ class NikkeiDatabase:
     def get_nikkei_touraku_records(self, start_date: str | None = None, end_date: str | None = None) -> list[sqlite3.Row]:
         return self._get_range("nikkei_touraku_records", start_date, end_date)
 
+    def get_latest_nikkei_per_record(self) -> sqlite3.Row | None:
+        return self._get_latest("nikkei_per_records")
+
+    def get_latest_nikkei_touraku_record(self) -> sqlite3.Row | None:
+        return self._get_latest("nikkei_touraku_records")
+
+    def get_latest_nikkei_margin_record(self) -> sqlite3.Row | None:
+        return self._get_latest("nikkei_margin_records")
+
+    def _get_latest(self, table: str) -> sqlite3.Row | None:
+        with self._connect() as conn:
+            return conn.execute(f"SELECT * FROM {table} ORDER BY date DESC LIMIT 1").fetchone()
+
     def get_nikkei_margin_records(self, start_date: str | None = None, end_date: str | None = None) -> list[sqlite3.Row]:
         return self._get_range("nikkei_margin_records", start_date, end_date)
 
@@ -205,6 +221,12 @@ class NikkeiDatabase:
 
     def upsert_jpx_investor_trends(self, record: dict) -> None:
         self._upsert("jpx_investor_trends", JPX_INVESTOR_TRENDS_COLUMNS, ("date",), record)
+
+    def get_latest_jpx_short_selling(self) -> sqlite3.Row | None:
+        return self._get_latest("jpx_short_selling")
+
+    def get_latest_jpx_investor_trends(self) -> sqlite3.Row | None:
+        return self._get_latest("jpx_investor_trends")
 
     def upsert_jpx_margin_position(self, record: dict) -> None:
         self._upsert("jpx_margin_positions", JPX_MARGIN_POSITION_COLUMNS, ("date", "code"), record)

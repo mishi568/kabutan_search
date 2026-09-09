@@ -102,6 +102,7 @@ GEMINI_RECOMMENDATION_COLUMNS = {
     "latest_price": "REAL",
     "return_pct": "REAL",
     "status": "TEXT",
+    "reason": "TEXT",
 }
 
 SECTOR_DAILY_RECORD_COLUMNS = {
@@ -263,6 +264,63 @@ class Database:
                 "ORDER BY date DESC LIMIT ?",
                 (code, limit),
             ).fetchall()
+
+    def get_distinct_stock_codes(self) -> list[str]:
+        with self._connect() as conn:
+            return [r[0] for r in conn.execute("SELECT DISTINCT code FROM stock_records").fetchall()]
+
+    def get_tracked_codes(self) -> set[str]:
+        with self._connect() as conn:
+            return {r[0] for r in conn.execute("SELECT code FROM tracked_stocks").fetchall()}
+
+    def get_recent_stock_history(self, code: str, limit: int = 160) -> list[sqlite3.Row]:
+        """直近limit件の日次レコードを新しい順(index 0が最新)で返す(price > 0のみ)"""
+        with self._connect() as conn:
+            return conn.execute(
+                "SELECT * FROM stock_records WHERE code = ? AND price > 0 ORDER BY date DESC LIMIT ?",
+                (code, limit),
+            ).fetchall()
+
+    def get_recent_margin_history(self, code: str, limit: int = 28) -> list[sqlite3.Row]:
+        """信用残が記録されている直近limit件を新しい順で返す(週次サンプルに相当)"""
+        with self._connect() as conn:
+            return conn.execute(
+                "SELECT * FROM stock_records WHERE code = ? AND (margin_buy IS NOT NULL OR margin_sell IS NOT NULL) "
+                "ORDER BY date DESC LIMIT ?",
+                (code, limit),
+            ).fetchall()
+
+    def get_sector_margin_summary(self) -> list[dict]:
+        """業種ごとに、直近レコードで信用買い残が前回比減少している銘柄の割合等を集計する"""
+        query = """
+            WITH MarginLatest AS (
+                SELECT
+                    code,
+                    sector,
+                    margin_buy,
+                    margin_sell,
+                    margin_ratio,
+                    (margin_buy - LAG(margin_buy, 1) OVER (PARTITION BY code ORDER BY date ASC)) AS margin_buy_change,
+                    (margin_sell - LAG(margin_sell, 1) OVER (PARTITION BY code ORDER BY date ASC)) AS margin_sell_change,
+                    ROW_NUMBER() OVER (PARTITION BY code ORDER BY date DESC) AS rn
+                FROM stock_records
+                WHERE margin_buy IS NOT NULL AND sector IS NOT NULL AND sector != ''
+            )
+            SELECT
+                sector,
+                COUNT(code) AS stock_count,
+                SUM(CASE WHEN margin_buy_change < 0 THEN 1 ELSE 0 END) AS buy_reduced_count,
+                ROUND(CAST(SUM(CASE WHEN margin_buy_change < 0 THEN 1 ELSE 0 END) AS REAL) * 100.0 / COUNT(code), 1) AS buy_reduced_pct,
+                SUM(CASE WHEN margin_sell_change > 0 THEN 1 ELSE 0 END) AS sell_increased_count,
+                ROUND(AVG(margin_ratio), 2) AS avg_margin_ratio
+            FROM MarginLatest
+            WHERE rn = 1
+            GROUP BY sector
+            HAVING stock_count >= 2
+            ORDER BY buy_reduced_pct DESC, avg_margin_ratio ASC
+        """
+        with self._connect() as conn:
+            return [dict(r) for r in conn.execute(query).fetchall()]
 
     def get_latest_records_for_screening(self) -> list[sqlite3.Row]:
         """全銘柄の最新レコードを取得する。信用残系カラムがNULLの場合は、
