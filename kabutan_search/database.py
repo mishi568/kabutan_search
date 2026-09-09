@@ -234,6 +234,14 @@ class Database:
             )
             return cur.fetchone()
 
+    def get_squeeze_score(self, code: str) -> tuple[int, str]:
+        """最新レコードのスクイーズスコア(★1〜5)を (score, 星文字列) で返す。データが無ければ (0, "")"""
+        row = self.get_latest_record(code)
+        score = row["squeeze_score"] if row else None
+        if not score:
+            return 0, ""
+        return score, "★" * score
+
     def get_records(self, code: str, start_date: str | None = None, end_date: str | None = None) -> list[sqlite3.Row]:
         query = "SELECT * FROM stock_records WHERE code = ?"
         params: list = [code]
