@@ -6,7 +6,18 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import edinet_holdings_fetcher, fetcher, gemini_prompt, margin_analysis, report, screening, sector_data_manager, tracker
+from . import (
+    edinet_holdings_fetcher,
+    fetcher,
+    gemini_prompt,
+    jpx_auto_syncer,
+    jpx_file_importer,
+    margin_analysis,
+    report,
+    screening,
+    sector_data_manager,
+    tracker,
+)
 from .database import Database
 from .nikkei_database import NikkeiDatabase
 from .sector_divergence_analyzer import calculate_sector_divergence
@@ -47,8 +58,8 @@ def cmd_fetch_watchlist(args: argparse.Namespace) -> None:
 
 
 def cmd_fetch_candidates(args: argparse.Namespace) -> None:
-    db, _ = _databases(args)
-    candidates = screening.screen(db, fetch_sectors=not args.no_sector_fetch)
+    db, nikkei_db = _databases(args)
+    candidates = screening.screen(db, nikkei_db, fetch_sectors=not args.no_sector_fetch)
     codes = [c["code"] for c in candidates]
     if not codes:
         print("Stage1候補銘柄がありません。")
@@ -70,8 +81,8 @@ def cmd_sector(args: argparse.Namespace) -> None:
 
 
 def cmd_screen(args: argparse.Namespace) -> None:
-    db, _ = _databases(args)
-    candidates = screening.screen(db)
+    db, nikkei_db = _databases(args)
+    candidates = screening.screen(db, nikkei_db)
     print(f"{len(candidates)}件の候補銘柄:")
     for c in candidates:
         print(f"  {c['code']}: score={c['screening_score']:.1f} ({c['reason']})")
@@ -136,6 +147,23 @@ def cmd_watch_list(args: argparse.Namespace) -> None:
         print(f"  {w['code']} {w['name']}: {w['diff_pct']:+.2f}% {w['squeeze_stars']}")
 
 
+def cmd_jpx_sync(args: argparse.Namespace) -> None:
+    db, nikkei_db = _databases(args)
+    fetch_result = jpx_auto_syncer.sync_all(cache_dir=Path(args.cache_dir))
+
+    for key in ("short_selling", "margin_positions", "investor_trends"):
+        sub = fetch_result[key]
+        if not sub["success"]:
+            print(f"{key}: 取得失敗 - {sub.get('error')}")
+            continue
+        for filepath in sub["files"]:
+            import_result = jpx_file_importer.import_file(db, nikkei_db, filepath)
+            if import_result["success"]:
+                print(f"  {import_result['message']}")
+            else:
+                print(f"  取込失敗 ({filepath}): {import_result['error']}", file=sys.stderr)
+
+
 def cmd_edinet_sync(args: argparse.Namespace) -> None:
     _, nikkei_db = _databases(args)
     result = edinet_holdings_fetcher.sync(nikkei_db, api_key=args.api_key)
@@ -197,6 +225,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_watch_remove)
     p = watch_sub.add_parser("list")
     p.set_defaults(func=cmd_watch_list)
+
+    p = sub.add_parser("jpx-sync", help="JPX公式データ(空売り・信用残高・投資部門別)を同期")
+    p.add_argument("--cache-dir", default="jpx_cache", help="ダウンロードファイルの保存先")
+    p.set_defaults(func=cmd_jpx_sync)
 
     p = sub.add_parser("edinet-sync", help="EDINET大量保有報告書を同期")
     p.add_argument("--api-key", help="EDINET APIキー(省略時は環境変数EDINET_API_KEY)")

@@ -239,6 +239,24 @@ class NikkeiDatabase:
     def upsert_jpx_margin_position(self, record: dict) -> None:
         self._upsert("jpx_margin_positions", JPX_MARGIN_POSITION_COLUMNS, ("date", "code"), record)
 
+    def get_latest_margin_positions_date(self) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT MAX(date) FROM jpx_margin_positions").fetchone()
+            return row[0] if row else None
+
+    def get_low_margin_ratio_positions(self, max_ratio: float = 1.5, date: str | None = None) -> list[sqlite3.Row]:
+        """信用倍率がmax_ratio以下(売り長=踏み上げ期待)の銘柄を、指定日(省略時は最新日)で返す"""
+        if date is None:
+            date = self.get_latest_margin_positions_date()
+        if date is None:
+            return []
+        with self._connect() as conn:
+            return conn.execute(
+                "SELECT * FROM jpx_margin_positions WHERE date = ? AND margin_ratio IS NOT NULL "
+                "AND margin_ratio <= ? ORDER BY margin_ratio ASC",
+                (date, max_ratio),
+            ).fetchall()
+
     def get_jpx_margin_positions(self, code: str) -> list[sqlite3.Row]:
         with self._connect() as conn:
             return conn.execute(

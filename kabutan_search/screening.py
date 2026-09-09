@@ -6,25 +6,34 @@
 候補の発掘元:
   1. お気に入り・保有ポジション銘柄(常時監視対象)
   2. 株探「出来高急増銘柄」ランキング(tansaku.py) — 玉集めの兆候を検知
-  3. セクターランキング(sector_data_manager) + 既知の直近株価データ — 所属セクターが
+  3. JPX公式の週次信用取引残高データ(jpx_margin_positions) — 信用倍率が低い(売り長=
+     踏み上げ期待)銘柄。株探にサイト全体の信用倍率ランキングページが見当たらなかったため、
+     kabutan.jpに一切アクセスしないこちらを採用(要: 事前に `jpx-sync` コマンドでの取得)
+  4. セクターランキング(sector_data_manager) + 既知の直近株価データ — 所属セクターが
      好調で、かつ既に把握している騰落率が高い銘柄
-
-「信用倍率が低い(売り長=踏み上げ期待)」ランキングは対象ページ未確定のため未実装
-(SPECIFICATION.md 8節)。ページが決まり次第、同様のソースとして追加できる。
 """
 from datetime import datetime
 
 from . import sector_data_manager, tansaku
 from .database import Database
+from .nikkei_database import NikkeiDatabase
 from .sector_divergence_analyzer import calculate_sector_divergence
 
 # 踏み上げ初動(1)・モメンタム急騰(2)のセクターを「勢いのあるセクター」とみなす
 HOT_SECTOR_SIGNAL_RANKS = (1, 2)
 # セクターが好調な銘柄について、これ以上の当日騰落率(%)であれば候補とする
 MIN_PRICE_CHANGE_PCT = 3.0
+# この倍率以下を「信用倍率が低い(売り長)」とみなす
+MAX_MARGIN_RATIO = 1.5
 
 
-def screen(db: Database, fetch_sectors: bool = True, include_volume_surge: bool = True) -> list[dict]:
+def screen(
+    db: Database,
+    nikkei_db: NikkeiDatabase | None = None,
+    fetch_sectors: bool = True,
+    include_volume_surge: bool = True,
+    include_low_margin_ratio: bool = True,
+) -> list[dict]:
     """当日の値上がり優位性候補を抽出し、candidate_stocksテーブルへ保存して返す。"""
     today = datetime.now().strftime("%Y-%m-%d")
 
@@ -57,7 +66,20 @@ def screen(db: Database, fetch_sectors: bool = True, include_volume_surge: bool 
                 "reason": f"出来高急増(前日比+{vol_chg:.0f}%): 玉集めの兆候",
             }
 
-    # 3. セクターモメンタム + 既知の値上がり率
+    # 3. JPX公式データ: 信用倍率が低い銘柄(売り長=踏み上げ期待)
+    if include_low_margin_ratio and nikkei_db is not None:
+        for pos in nikkei_db.get_low_margin_ratio_positions(max_ratio=MAX_MARGIN_RATIO):
+            code = pos["code"]
+            if code in candidates:
+                continue
+            ratio = pos["margin_ratio"]
+            candidates[code] = {
+                "code": code,
+                "screening_score": 500.0 * (MAX_MARGIN_RATIO - ratio + 0.1),  # 倍率が低いほど高スコア
+                "reason": f"JPX信用倍率{ratio:.2f}倍(売り長=踏み上げ期待)",
+            }
+
+    # 4. セクターモメンタム + 既知の値上がり率
     for code in db.get_distinct_stock_codes():
         if code in candidates:
             continue
