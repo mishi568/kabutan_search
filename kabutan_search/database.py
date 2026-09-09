@@ -57,7 +57,7 @@ STOCK_RECORD_COLUMNS = {
     "progress_excess": "REAL",
     # 決算・優待
     "earnings_date": "TEXT",
-    "has_yutai": "INTEGER",
+    "has_yutai": "TEXT",
     # 成長率
     "cagr_revenue_3y": "REAL",
     "cagr_revenue_5y": "REAL",
