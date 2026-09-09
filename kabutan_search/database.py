@@ -247,6 +247,45 @@ class Database:
         with self._connect() as conn:
             return conn.execute(query, params).fetchall()
 
+    def get_stock_close_prices(self, code: str, limit: int = 75) -> list[sqlite3.Row]:
+        """直近limit件の終値を新しい順(index 0が最新)で返す"""
+        with self._connect() as conn:
+            return conn.execute(
+                "SELECT date, price FROM stock_records WHERE code = ? AND price IS NOT NULL "
+                "ORDER BY date DESC LIMIT ?",
+                (code, limit),
+            ).fetchall()
+
+    def get_latest_records_for_screening(self) -> list[sqlite3.Row]:
+        """全銘柄の最新レコードを取得する。信用残系カラムがNULLの場合は、
+        その銘柄の直近の非NULL値で補完する(信用残は毎日更新されないため)。"""
+        query = """
+            SELECT r.*,
+                   COALESCE(r.margin_sell, (
+                       SELECT margin_sell FROM stock_records
+                       WHERE code = r.code AND margin_sell IS NOT NULL
+                       ORDER BY date DESC LIMIT 1
+                   )) AS margin_sell,
+                   COALESCE(r.margin_buy, (
+                       SELECT margin_buy FROM stock_records
+                       WHERE code = r.code AND margin_buy IS NOT NULL
+                       ORDER BY date DESC LIMIT 1
+                   )) AS margin_buy,
+                   COALESCE(r.margin_ratio, (
+                       SELECT margin_ratio FROM stock_records
+                       WHERE code = r.code AND margin_ratio IS NOT NULL
+                       ORDER BY date DESC LIMIT 1
+                   )) AS margin_ratio
+            FROM stock_records r
+            INNER JOIN (
+                SELECT code, MAX(date) AS max_date
+                FROM stock_records
+                GROUP BY code
+            ) m ON r.code = m.code AND r.date = m.max_date
+        """
+        with self._connect() as conn:
+            return conn.execute(query).fetchall()
+
     # -- tracked_stocks (お気に入り) --------------------------------------
 
     def add_tracked_stock(self, code: str, name: str, tracked_date: str, tracked_price: float) -> None:
