@@ -26,6 +26,40 @@ def cmd_fetch(args: argparse.Namespace) -> None:
     print(f"{data['code']} {data['name']}: 株価{data['price']}円 を保存しました。")
 
 
+def _report_bulk_result(result: dict) -> None:
+    msg = f"完了: 成功{len(result['succeeded'])}件 / 失敗{len(result['failed'])}件"
+    if result["stopped_early"]:
+        msg += f" (アクセス制限のため中断: {result.get('error', '')})"
+    print(msg)
+
+
+def cmd_fetch_watchlist(args: argparse.Namespace) -> None:
+    db, _ = _databases(args)
+    codes = sorted(db.get_tracked_codes() | {p["code"] for p in db.list_positions()})
+    if not codes:
+        print("お気に入り・ポジション登録銘柄がありません。先に `watch add <code>` してください。")
+        return
+    print(f"{len(codes)}件を取得します(株探への配慮のため間隔を空けます)...")
+    result = fetcher.bulk_fetch(
+        db, codes, on_progress=lambda code, data, i, n: print(f"  [{i}/{n}] {code} {data['name']}")
+    )
+    _report_bulk_result(result)
+
+
+def cmd_fetch_candidates(args: argparse.Namespace) -> None:
+    db, _ = _databases(args)
+    candidates = screening.screen(db, fetch_sectors=not args.no_sector_fetch)
+    codes = [c["code"] for c in candidates]
+    if not codes:
+        print("Stage1候補銘柄がありません。")
+        return
+    print(f"Stage1候補 {len(codes)}件を取得します(株探への配慮のため間隔を空けます)...")
+    result = fetcher.bulk_fetch(
+        db, codes, on_progress=lambda code, data, i, n: print(f"  [{i}/{n}] {code} {data['name']}")
+    )
+    _report_bulk_result(result)
+
+
 def cmd_sector(args: argparse.Namespace) -> None:
     db, _ = _databases(args)
     records = sector_data_manager.fetch_sector_ranking(db)
@@ -119,6 +153,13 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("fetch", help="個別銘柄ページを取得してDBに保存")
     p.add_argument("code", help="4桁の証券コード")
     p.set_defaults(func=cmd_fetch)
+
+    p = sub.add_parser("fetch-watchlist", help="お気に入り・ポジション銘柄をまとめて取得(配慮付き)")
+    p.set_defaults(func=cmd_fetch_watchlist)
+
+    p = sub.add_parser("fetch-candidates", help="Stage1候補銘柄をまとめて取得(配慮付き)")
+    p.add_argument("--no-sector-fetch", action="store_true", help="screen実行時のセクターデータ再取得をスキップ")
+    p.set_defaults(func=cmd_fetch_candidates)
 
     p = sub.add_parser("sector", help="セクターランキングを取得しモメンタムを表示")
     p.set_defaults(func=cmd_sector)
