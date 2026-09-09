@@ -347,9 +347,47 @@ class Database:
     def get_sector_daily_records(self, date: str) -> list[sqlite3.Row]:
         with self._connect() as conn:
             return conn.execute(
-                "SELECT * FROM sector_daily_records WHERE date = ? ORDER BY sector_code",
+                "SELECT * FROM sector_daily_records WHERE date = ? ORDER BY change_pct DESC",
                 (date,),
             ).fetchall()
+
+    def update_sector_short_ratio(self, date: str, sector_code_or_name: str, short_ratio: float) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE sector_daily_records SET short_ratio = ?
+                WHERE date = ? AND (sector_code = ? OR sector_name = ?)
+                """,
+                (short_ratio, date, sector_code_or_name, sector_code_or_name),
+            )
+
+    def batch_update_sector_short_ratios(self, date: str, ratio_map: dict) -> None:
+        with self._connect() as conn:
+            conn.executemany(
+                """
+                UPDATE sector_daily_records SET short_ratio = ?
+                WHERE date = ? AND (sector_code = ? OR sector_name = ?)
+                """,
+                [(ratio, date, str(key), str(key)) for key, ratio in ratio_map.items()],
+            )
+
+    def get_latest_sector_date(self) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT MAX(date) FROM sector_daily_records").fetchone()
+            return row[0] if row else None
+
+    def get_all_sector_dates(self) -> list[str]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT DISTINCT date FROM sector_daily_records ORDER BY date DESC").fetchall()
+            return [r[0] for r in rows]
+
+    def get_sector_history(self, sector_code: str, limit: int = 60) -> list[sqlite3.Row]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM sector_daily_records WHERE sector_code = ? ORDER BY date ASC",
+                (sector_code,),
+            ).fetchall()
+            return rows[-limit:] if len(rows) > limit else rows
 
     # -- candidate_stocks (Stage1スクリーニング結果) --------------------------
 
