@@ -84,8 +84,11 @@ EDINET_LARGE_HOLDING_COLUMNS = {
     "doc_id": "TEXT PRIMARY KEY",
     "date": "TEXT",
     "code": "TEXT",
+    "issuer_name": "TEXT",
     "holder_name": "TEXT",
     "holding_ratio": "REAL",
+    "report_type": "TEXT",
+    "purpose": "TEXT",
     "submission_date": "TEXT",
     "timestamp": "TEXT",
 }
@@ -266,3 +269,8 @@ class NikkeiDatabase:
                 "SELECT * FROM edinet_large_holdings WHERE code = ? ORDER BY submission_date DESC",
                 (code,),
             ).fetchall()
+
+    def get_latest_edinet_date(self) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT MAX(date) FROM edinet_large_holdings").fetchone()
+            return row[0] if row else None
