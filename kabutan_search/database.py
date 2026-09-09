@@ -235,6 +235,17 @@ class Database:
             )
             return cur.fetchone()
 
+    def get_stock_name(self, code: str) -> str | None:
+        """銘柄名を取得する(お気に入り登録名 > 最新レコード名の優先順)"""
+        with self._connect() as conn:
+            row = conn.execute("SELECT name FROM tracked_stocks WHERE code = ? LIMIT 1", (code,)).fetchone()
+            if row and row["name"]:
+                return row["name"]
+            row = conn.execute(
+                "SELECT name FROM stock_records WHERE code = ? ORDER BY date DESC LIMIT 1", (code,)
+            ).fetchone()
+            return row["name"] if row and row["name"] else None
+
     def get_squeeze_score(self, code: str) -> tuple[int, str]:
         """最新レコードのスクイーズスコア(★1〜5)を (score, 星文字列) で返す。データが無ければ (0, "")"""
         row = self.get_latest_record(code)

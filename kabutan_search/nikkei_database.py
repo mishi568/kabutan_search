@@ -42,6 +42,8 @@ JPX_SHORT_SELLING_COLUMNS = {
     "short_selling_ratio": "REAL",
     "short_selling_value": "REAL",
     "total_value": "REAL",
+    "regulated_ratio": "REAL",
+    "non_regulated_ratio": "REAL",
     "timestamp": "TEXT",
 }
 
@@ -59,9 +61,12 @@ JPX_INVESTOR_TRENDS_COLUMNS = {
 JPX_MARGIN_POSITION_COLUMNS = {
     "date": "TEXT NOT NULL",
     "code": "TEXT NOT NULL",
+    "name": "TEXT",
     "margin_buy": "REAL",
     "margin_sell": "REAL",
     "margin_ratio": "REAL",
+    "margin_buy_change": "REAL",
+    "margin_sell_change": "REAL",
     "timestamp": "TEXT",
 }
 
