@@ -17,6 +17,7 @@ import pandas as pd
 
 from .database import Database
 from .nikkei_database import NikkeiDatabase
+from .ranking_common import clean_numeric
 
 SECTOR_33_NAMES = [
     "水産・農林業", "鉱業", "建設業", "食料品", "繊維製品",
@@ -161,6 +162,10 @@ def _parse_and_save_pdf(db: Database, nikkei_db: NikkeiDatabase, path: Path) -> 
 
     date_str = _extract_date_from_text(all_text, filename) or datetime.now().strftime("%Y-%m-%d")
 
+    # Priority 0: 投資部門別売買状況 (stock_val_*.pdf / stock_vol_*.pdf)
+    if "stock_val" in filename or "stock_vol" in filename or "投資部門別" in all_text:
+        return _parse_and_save_investor_trends_pdf(nikkei_db, all_text, all_tables)
+
     # Priority 1: 個別銘柄信用取引残高 (mtdailyk*.pdf)
     if "mtdaily" in filename or "個別銘柄信用取引残高" in all_text or "Outstanding Margin Trading by Issue" in all_text or "JP3" in all_text:
         margin_records = []
@@ -282,6 +287,74 @@ def _parse_and_save_pdf(db: Database, nikkei_db: NikkeiDatabase, path: Path) -> 
                     pass
 
     return {"success": False, "error": f"PDFファイル({filename})から有効なJPXデータ(空売り集計・信用残高・主体別)を抽出できませんでした。"}
+
+
+# ---------------------------------------------------------------------------
+# 投資部門別売買動向 (PDF: stock_val_*.pdf / stock_vol_*.pdf)
+# ---------------------------------------------------------------------------
+
+# PDF内の投資主体カテゴリ名(日本語見出し) → jpx_investor_trends のカラム名
+_INVESTOR_CATEGORY_COLUMNS = {
+    "自己計": "other_net",
+    "海外投資家": "foreign_net",
+    "個人": "individual_net",
+    "投資信託": "investment_trust_net",
+    "事業法人": "business_corp_net",
+    "信託銀行": "trust_bank_net",
+}
+
+
+def _extract_investor_trends_week_end_date(all_text: str) -> str:
+    """「2026年9月第1週 ... ( 8/31 - 9/4 )」のような表記から最新週の終了日を抽出する"""
+    year_match = re.search(r"(\d{4})年(\d{1,2})月", all_text)
+    week_matches = re.findall(r"(\d{2})/(\d{2})[～\-](\d{2})/(\d{2})", all_text)
+    if week_matches:
+        _, _, end_month, end_day = week_matches[-1]
+        year = int(year_match.group(1)) if year_match else datetime.now().year
+        return f"{year:04d}-{int(end_month):02d}-{int(end_day):02d}"
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def _parse_and_save_investor_trends_pdf(nikkei_db: NikkeiDatabase, all_text: str, all_tables: list) -> dict:
+    """投資部門別売買状況PDF(株数/金額共通レイアウト)を解析し、最新週の(買い-売り)純額を保存する。
+
+    各カテゴリは3行組(売り/買い/合計)で構成され、直近週の値は各行の7列目(index=6)。
+    """
+    date_str = _extract_investor_trends_week_end_date(all_text)
+
+    net_by_category: dict[str, dict] = {}
+    for table in all_tables:
+        current_category = None
+        for row in table:
+            if not row:
+                continue
+            label = row[0]
+            if label:
+                # 「法 人」「個 人」のようにカラム幅調整用の空白(全角含む)が漢字間に入るため除去する
+                jp_name = re.sub(r"[\s　]+", "", str(label).split("\n")[0])
+                current_category = _INVESTOR_CATEGORY_COLUMNS.get(jp_name)
+            if current_category is None or len(row) < 7:
+                continue
+            row_type = row[1]
+            if row_type not in ("売り", "買い"):
+                continue
+            value = clean_numeric(str(row[6])) if row[6] else None
+            net_by_category.setdefault(current_category, {})[row_type] = value
+
+    record = {"date": date_str}
+    for column in _INVESTOR_CATEGORY_COLUMNS.values():
+        parts = net_by_category.get(column, {})
+        sell, buy = parts.get("売り"), parts.get("買い")
+        record[column] = (buy - sell) if (buy is not None and sell is not None) else None
+
+    if not any(v is not None for k, v in record.items() if k != "date"):
+        return {"success": False, "error": "投資部門別売買状況PDFから有効なデータを抽出できませんでした。"}
+
+    nikkei_db.upsert_jpx_investor_trends(record)
+    return {
+        "success": True, "file_type": "INVESTOR_TRENDS", "date": date_str, "rows_saved": 1,
+        "message": f"【投資部門別売買状況】{date_str}(週末時点)の主体別売買動向を正常に取り込みました。",
+    }
 
 
 # ---------------------------------------------------------------------------
