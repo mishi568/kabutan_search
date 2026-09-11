@@ -24,9 +24,11 @@ def generate_markdown_report(db: Database, nikkei_db: NikkeiDatabase, only_impro
     latest_nt = nikkei_db.get_latest_nikkei225jp_nt_ratio()
     latest_arb = nikkei_db.get_latest_nikkei225jp_arbitrage()
     latest_fb = nikkei_db.get_latest_nikkei225jp_futures_broker()
+    latest_fear = nikkei_db.get_latest_nikkei225jp_fear_index()
     has_arb = latest_arb and latest_arb["net_shares"] is not None
     has_fb = latest_fb and latest_fb["foreign_net"] is not None
-    if latest_nt or has_arb or has_fb:
+    has_fear = latest_fear and latest_fear["japan_vi"] is not None
+    if latest_nt or has_arb or has_fb or has_fear:
         lines.append("## 全体相場環境")
         if latest_nt:
             usdjpy_str = f"、ドル円 {latest_nt['usdjpy']:.2f}円" if latest_nt["usdjpy"] is not None else ""
@@ -44,6 +46,10 @@ def generate_markdown_report(db: Database, nikkei_db: NikkeiDatabase, only_impro
                 f"- 日経225先物 外資系証券ネット建玉: {latest_fb['foreign_net']:+,.0f}枚 "
                 f"(買建{(latest_fb['foreign_buy'] or 0):,.0f} / 売建{(latest_fb['foreign_sell'] or 0):,.0f}、"
                 f"基準週: {latest_fb['date']})"
+            )
+        if has_fear:
+            lines.append(
+                f"- 日本VI(日経恐怖指数): {latest_fear['japan_vi']:.2f} (基準日: {latest_fear['date']})"
             )
         lines.append("")
 

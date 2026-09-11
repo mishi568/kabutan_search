@@ -29,6 +29,7 @@ PAGE_URLS = {
     "NT": BASE_URL + "nt.php",
     "SAITEI": BASE_URL + "saitei.php",
     "FUTURES": BASE_URL + "futures.php",
+    "VIX": BASE_URL + "vix.php",
 }
 
 USER_AGENT = (
@@ -467,6 +468,51 @@ def sync_futures(nikkei_db: NikkeiDatabase, session: requests.Session | None = N
     }
 
 
+def parse_vix(html: str) -> list[dict]:
+    """vix.php(恐怖指数、日本VI・VSTOXX・VIX)を解析する。
+
+    列: 日付/日本225/変化/プライム出来高(百万株)/日本VI(日経恐怖指数)/
+        VSTOXX(欧州恐怖指数)/VIX(米国恐怖指数)
+    日本市場休場日は価格・日本VIが「-」になるが、海外指数(VSTOXX/VIX)は
+    値が入ることがある。整数部・小数部間のスペース崩れを除去してから解析する。
+    """
+    records = []
+    for cells in _parse_datatbl_rows(html):
+        if len(cells) < 7 or not _is_daily_date(cells[0]):
+            continue
+        records.append({
+            "date": _normalize_date(cells[0]),
+            "price": clean_numeric(cells[1].replace(" ", "")),
+            "price_change": clean_numeric(cells[2].replace(" ", "")),
+            "prime_volume": clean_numeric(cells[3]),
+            "japan_vi": clean_numeric(cells[4].replace(" ", "")),
+            "vstoxx": clean_numeric(cells[5].replace(" ", "")),
+            "vix": clean_numeric(cells[6].replace(" ", "")),
+            "timestamp": datetime.now().isoformat(),
+        })
+    return records
+
+
+def sync_vix(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
+    try:
+        html = fetch_page("VIX", session)
+    except requests.RequestException as e:
+        return {"success": False, "error": f"vix.php の取得に失敗しました: {e}"}
+
+    records = parse_vix(html)
+    if not records:
+        return {"success": False, "error": "vix.php からデータ行を抽出できませんでした。"}
+
+    for rec in records:
+        nikkei_db.upsert_nikkei225jp_fear_index(rec)
+
+    return {
+        "success": True,
+        "rows_saved": len(records),
+        "message": f"【恐怖指数】{records[0]['date']} 時点までの{len(records)}件を取り込みました。",
+    }
+
+
 def sync_per(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
     try:
         html = fetch_page("PER", session)
@@ -488,7 +534,7 @@ def sync_per(nikkei_db: NikkeiDatabase, session: requests.Session | None = None)
 
 
 def sync_all(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
-    """nikkei225jp.comの全8ページ(per/shutai/sinyou/karauri/touraku/nt/saitei/futures)を同期する。"""
+    """nikkei225jp.comの全9ページ(per/shutai/sinyou/karauri/touraku/nt/saitei/futures/vix)を同期する。"""
     session = session or _session()
     return {
         "per": sync_per(nikkei_db, session),
@@ -499,4 +545,5 @@ def sync_all(nikkei_db: NikkeiDatabase, session: requests.Session | None = None)
         "nt": sync_nt(nikkei_db, session),
         "saitei": sync_saitei(nikkei_db, session),
         "futures": sync_futures(nikkei_db, session),
+        "vix": sync_vix(nikkei_db, session),
     }

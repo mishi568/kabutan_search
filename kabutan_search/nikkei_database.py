@@ -162,6 +162,20 @@ NIKKEI225JP_FUTURES_BROKER_COLUMNS = {
     "timestamp": "TEXT",
 }
 
+NIKKEI225JP_FEAR_INDEX_COLUMNS = {
+    # nikkei225jp.com/data/vix.php(恐怖指数、日本VI・VSTOXX・VIX)
+    # 日本VIはJPX算出の日経平均ボラティリティ指数。リスクオン/オフの目安として、
+    # 大局判断(買うか見送りか)のステップに使う。
+    "date": "TEXT PRIMARY KEY",
+    "price": "REAL",
+    "price_change": "REAL",
+    "prime_volume": "REAL",
+    "japan_vi": "REAL",
+    "vstoxx": "REAL",
+    "vix": "REAL",
+    "timestamp": "TEXT",
+}
+
 JPX_MARGIN_POSITION_COLUMNS = {
     "date": "TEXT NOT NULL",
     "code": "TEXT NOT NULL",
@@ -261,6 +275,11 @@ class NikkeiDatabase:
                 "CREATE TABLE IF NOT EXISTS nikkei225jp_futures_broker (date TEXT PRIMARY KEY)"
             )
             ensure_columns(conn, "nikkei225jp_futures_broker", NIKKEI225JP_FUTURES_BROKER_COLUMNS)
+
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS nikkei225jp_fear_index (date TEXT PRIMARY KEY)"
+            )
+            ensure_columns(conn, "nikkei225jp_fear_index", NIKKEI225JP_FEAR_INDEX_COLUMNS)
 
             conn.execute(
                 """
@@ -376,6 +395,17 @@ class NikkeiDatabase:
         self, start_date: str | None = None, end_date: str | None = None
     ) -> list[sqlite3.Row]:
         return self._get_range("nikkei225jp_futures_broker", start_date, end_date)
+
+    def upsert_nikkei225jp_fear_index(self, record: dict) -> None:
+        self._upsert("nikkei225jp_fear_index", NIKKEI225JP_FEAR_INDEX_COLUMNS, ("date",), record)
+
+    def get_latest_nikkei225jp_fear_index(self) -> sqlite3.Row | None:
+        return self._get_latest("nikkei225jp_fear_index")
+
+    def get_nikkei225jp_fear_index(
+        self, start_date: str | None = None, end_date: str | None = None
+    ) -> list[sqlite3.Row]:
+        return self._get_range("nikkei225jp_fear_index", start_date, end_date)
 
     def get_nikkei_per_records(self, start_date: str | None = None, end_date: str | None = None) -> list[sqlite3.Row]:
         return self._get_range("nikkei_per_records", start_date, end_date)

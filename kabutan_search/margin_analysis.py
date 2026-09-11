@@ -679,6 +679,17 @@ def _format_nikkei_section(nikkei_db: NikkeiDatabase) -> str:
             f"ネット買いが大きいほど強気(先高観)の目安\n"
         )
 
+    fear_index_line = ""
+    latest_fear = nikkei_db.get_latest_nikkei225jp_fear_index()
+    if latest_fear and latest_fear["japan_vi"] is not None:
+        vstoxx_str = f" / VSTOXX{latest_fear['vstoxx']:.2f}" if latest_fear["vstoxx"] is not None else ""
+        vix_str = f" / VIX{latest_fear['vix']:.2f}" if latest_fear["vix"] is not None else ""
+        fear_index_line = (
+            f"- **日本VI(日経恐怖指数)**: {latest_fear['japan_vi']:.2f} (基準日: {latest_fear['date']}{vstoxx_str}{vix_str}) "
+            f"※市場のリスクオン/オフの目安。20未満は平静、30超は警戒、40超は強いパニック局面の目安。"
+            f"急上昇時は新規の踏み上げ狙いより既存ポジションのリスク管理を優先すべき局面\n"
+        )
+
     return f"""## 🌐 【前提】全体相場環境データ(日経平均・JPX公式需給データ)
 - **最新株価**: {lp_price:,.2f} 円 (基準日: {lp_date})
 - **PER**: {lp_per:.2f} 倍 (EPS: {lp_eps:,.2f} 円)
@@ -687,7 +698,7 @@ def _format_nikkei_section(nikkei_db: NikkeiDatabase) -> str:
 - **信用買い残 (東証全体)**: {lm_buy:,.1f} 億円 (基準日: {lm_date})
 - **信用売り残 (東証全体)**: {lm_sell:,.1f} 億円 (基準日: {lm_date})
 - **信用倍率 (東証全体)**: {lm_ratio:.2f} 倍
-{profit_loss_line}{nt_ratio_line}{arbitrage_line}{futures_broker_line}
+{profit_loss_line}{nt_ratio_line}{arbitrage_line}{futures_broker_line}{fear_index_line}
 📈 直近の推移データ (過去の時系列トレンド)
 {trend_str}
 
