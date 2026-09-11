@@ -4,16 +4,23 @@ kabutan.jp/JPX公式データを補完する第三のデータ源。日経225指
 騰落レシオ、信用残高、主体別売買動向、空売り比率、NT倍率などを提供する。
 kabutan.jpには一切アクセスしない。
 
-各ページは共通のテーブル構造(id="datatbl", ヘッダーは<th>, データ行は<td>で
-1列目が<time>タグの日付)を持つため、テーブル抽出自体は共通化し、列ごとの
+各ページは共通のテーブル構造(id="datatbl"または"sumTBL"等、ヘッダーは<th>、
+データ行は<td>で1列目が日付)を持つため、テーブル抽出自体は共通化し、列ごとの
 意味づけ(パース)だけをページ別に行う。
+
+【重要】このサイトのテーブルはJavaScriptが実行された後にDOMへ書き込まれる
+(document.write()や外部データファイルの読み込み結果を元にJSが描画する)ため、
+素のHTTP GET(requests)では空のテーブルしか取得できない。実際にブラウザで
+ページを開いて保存したHTMLでは値が入っているが、requestsでの取得では
+「データ行を抽出できませんでした」という失敗になることを運用環境での実行で確認した。
+そのためPlaywright(ヘッドレスブラウザ)でJSを実行させてから取得する。
 """
 import re
 from datetime import datetime
-from pathlib import Path
 
-import requests
 from bs4 import BeautifulSoup
+from playwright.sync_api import Error as PlaywrightError
+from playwright.sync_api import sync_playwright
 
 from .nikkei_database import NikkeiDatabase
 from .ranking_common import clean_numeric
@@ -36,22 +43,60 @@ USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
-REQUEST_TIMEOUT = 15
+PAGE_LOAD_TIMEOUT_MS = 30000
 
 
-def _session() -> requests.Session:
-    s = requests.Session()
-    s.headers.update({"User-Agent": USER_AGENT})
-    return s
+class FetchError(Exception):
+    """ページ取得(ブラウザでの読み込み)に失敗したことを表す。"""
 
 
-def fetch_page(key: str, session: requests.Session | None = None) -> str:
-    """指定ページのHTMLを取得する。keyはPAGE_URLSのキー。"""
-    session = session or _session()
-    resp = session.get(PAGE_URLS[key], timeout=REQUEST_TIMEOUT)
-    resp.raise_for_status()
-    resp.encoding = resp.apparent_encoding or resp.encoding
-    return resp.text
+class Nikkei225jpSession:
+    """nikkei225jp.comのJS描画済みページをPlaywrightで取得するセッション。
+
+    ブラウザの起動はコストが高いため、sync_all()での一連の取得中は
+    同じインスタンス(同じブラウザ)を使い回す想定。使い終わったらclose()すること。
+    """
+
+    def __init__(self) -> None:
+        self._playwright = sync_playwright().start()
+        try:
+            self._browser = self._playwright.chromium.launch()
+            self._page = self._browser.new_page(user_agent=USER_AGENT)
+        except Exception:
+            self._playwright.stop()
+            raise
+
+    def get_html(self, url: str) -> str:
+        try:
+            response = self._page.goto(url, wait_until="networkidle", timeout=PAGE_LOAD_TIMEOUT_MS)
+        except PlaywrightError as e:
+            raise FetchError(f"ページの読み込みに失敗しました: {e}") from e
+        if response is not None and not response.ok:
+            raise FetchError(f"HTTPエラー: status={response.status}")
+        # document.write等の同期的なDOM書き込みが確実に終わるよう少し待つ
+        self._page.wait_for_timeout(500)
+        return self._page.content()
+
+    def close(self) -> None:
+        try:
+            self._browser.close()
+        finally:
+            self._playwright.stop()
+
+
+def _session() -> Nikkei225jpSession:
+    return Nikkei225jpSession()
+
+
+def fetch_page(key: str, session: Nikkei225jpSession | None = None) -> str:
+    """指定ページのJS描画済みHTMLを取得する。keyはPAGE_URLSのキー。"""
+    own_session = session is None
+    sess = session or _session()
+    try:
+        return sess.get_html(PAGE_URLS[key])
+    finally:
+        if own_session:
+            sess.close()
 
 
 def _parse_datatbl_rows(html: str, table_id: str = "datatbl") -> list[list[str]]:
@@ -158,10 +203,10 @@ def parse_shutai(html: str) -> list[dict]:
     return records
 
 
-def sync_shutai(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
+def sync_shutai(nikkei_db: NikkeiDatabase, session: Nikkei225jpSession | None = None) -> dict:
     try:
         html = fetch_page("SHUTAI", session)
-    except requests.RequestException as e:
+    except FetchError as e:
         return {"success": False, "error": f"shutai.php の取得に失敗しました: {e}"}
 
     records = parse_shutai(html)
@@ -204,10 +249,10 @@ def parse_sinyou(html: str) -> list[dict]:
     return records
 
 
-def sync_sinyou(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
+def sync_sinyou(nikkei_db: NikkeiDatabase, session: Nikkei225jpSession | None = None) -> dict:
     try:
         html = fetch_page("SINYOU", session)
-    except requests.RequestException as e:
+    except FetchError as e:
         return {"success": False, "error": f"sinyou.php の取得に失敗しました: {e}"}
 
     records = parse_sinyou(html)
@@ -250,10 +295,10 @@ def parse_karauri(html: str) -> list[dict]:
     return records
 
 
-def sync_karauri(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
+def sync_karauri(nikkei_db: NikkeiDatabase, session: Nikkei225jpSession | None = None) -> dict:
     try:
         html = fetch_page("KARAURI", session)
-    except requests.RequestException as e:
+    except FetchError as e:
         return {"success": False, "error": f"karauri.php の取得に失敗しました: {e}"}
 
     records = parse_karauri(html)
@@ -298,10 +343,10 @@ def parse_touraku(html: str) -> list[dict]:
     return records
 
 
-def sync_touraku(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
+def sync_touraku(nikkei_db: NikkeiDatabase, session: Nikkei225jpSession | None = None) -> dict:
     try:
         html = fetch_page("TOURAKU", session)
-    except requests.RequestException as e:
+    except FetchError as e:
         return {"success": False, "error": f"touraku.php の取得に失敗しました: {e}"}
 
     records = parse_touraku(html)
@@ -346,10 +391,10 @@ def parse_nt(html: str) -> list[dict]:
     return records
 
 
-def sync_nt(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
+def sync_nt(nikkei_db: NikkeiDatabase, session: Nikkei225jpSession | None = None) -> dict:
     try:
         html = fetch_page("NT", session)
-    except requests.RequestException as e:
+    except FetchError as e:
         return {"success": False, "error": f"nt.php の取得に失敗しました: {e}"}
 
     records = parse_nt(html)
@@ -394,10 +439,10 @@ def parse_saitei(html: str) -> list[dict]:
     return records
 
 
-def sync_saitei(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
+def sync_saitei(nikkei_db: NikkeiDatabase, session: Nikkei225jpSession | None = None) -> dict:
     try:
         html = fetch_page("SAITEI", session)
-    except requests.RequestException as e:
+    except FetchError as e:
         return {"success": False, "error": f"saitei.php の取得に失敗しました: {e}"}
 
     records = parse_saitei(html)
@@ -448,10 +493,10 @@ def parse_futures(html: str) -> list[dict]:
     return records
 
 
-def sync_futures(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
+def sync_futures(nikkei_db: NikkeiDatabase, session: Nikkei225jpSession | None = None) -> dict:
     try:
         html = fetch_page("FUTURES", session)
-    except requests.RequestException as e:
+    except FetchError as e:
         return {"success": False, "error": f"futures.php の取得に失敗しました: {e}"}
 
     records = parse_futures(html)
@@ -493,10 +538,10 @@ def parse_vix(html: str) -> list[dict]:
     return records
 
 
-def sync_vix(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
+def sync_vix(nikkei_db: NikkeiDatabase, session: Nikkei225jpSession | None = None) -> dict:
     try:
         html = fetch_page("VIX", session)
-    except requests.RequestException as e:
+    except FetchError as e:
         return {"success": False, "error": f"vix.php の取得に失敗しました: {e}"}
 
     records = parse_vix(html)
@@ -513,10 +558,10 @@ def sync_vix(nikkei_db: NikkeiDatabase, session: requests.Session | None = None)
     }
 
 
-def sync_per(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
+def sync_per(nikkei_db: NikkeiDatabase, session: Nikkei225jpSession | None = None) -> dict:
     try:
         html = fetch_page("PER", session)
-    except requests.RequestException as e:
+    except FetchError as e:
         return {"success": False, "error": f"per.php の取得に失敗しました: {e}"}
 
     records = parse_per(html)
@@ -533,17 +578,25 @@ def sync_per(nikkei_db: NikkeiDatabase, session: requests.Session | None = None)
     }
 
 
-def sync_all(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
-    """nikkei225jp.comの全9ページ(per/shutai/sinyou/karauri/touraku/nt/saitei/futures/vix)を同期する。"""
+def sync_all(nikkei_db: NikkeiDatabase, session: Nikkei225jpSession | None = None) -> dict:
+    """nikkei225jp.comの全9ページ(per/shutai/sinyou/karauri/touraku/nt/saitei/futures/vix)を同期する。
+
+    ブラウザの起動は重いため、9ページすべてで同じセッション(同じブラウザ)を使い回す。
+    """
+    own_session = session is None
     session = session or _session()
-    return {
-        "per": sync_per(nikkei_db, session),
-        "shutai": sync_shutai(nikkei_db, session),
-        "sinyou": sync_sinyou(nikkei_db, session),
-        "karauri": sync_karauri(nikkei_db, session),
-        "touraku": sync_touraku(nikkei_db, session),
-        "nt": sync_nt(nikkei_db, session),
-        "saitei": sync_saitei(nikkei_db, session),
-        "futures": sync_futures(nikkei_db, session),
-        "vix": sync_vix(nikkei_db, session),
-    }
+    try:
+        return {
+            "per": sync_per(nikkei_db, session),
+            "shutai": sync_shutai(nikkei_db, session),
+            "sinyou": sync_sinyou(nikkei_db, session),
+            "karauri": sync_karauri(nikkei_db, session),
+            "touraku": sync_touraku(nikkei_db, session),
+            "nt": sync_nt(nikkei_db, session),
+            "saitei": sync_saitei(nikkei_db, session),
+            "futures": sync_futures(nikkei_db, session),
+            "vix": sync_vix(nikkei_db, session),
+        }
+    finally:
+        if own_session:
+            session.close()
