@@ -27,6 +27,7 @@ PAGE_URLS = {
     "KARAURI": BASE_URL + "karauri.php",
     "TOURAKU": BASE_URL + "touraku.php",
     "NT": BASE_URL + "nt.php",
+    "SAITEI": BASE_URL + "saitei.php",
 }
 
 USER_AGENT = (
@@ -363,6 +364,54 @@ def sync_nt(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) 
     }
 
 
+def parse_saitei(html: str) -> list[dict]:
+    """saitei.php(裁定買い残／裁定売り残)の日次(株数ベース)テーブルを解析する。
+
+    列: 日付/日本225/変化/プライム売買代金(億円)/買い残(千株)/売り残(千株)/差引(千株)/差引前比(千株)
+    ページには週次(金額・億円)ビューもあるが、表は外部JSデータファイル
+    (`DAILY`変数、別途読み込まれるscriptファイル)を元にJavaScriptが描画しており、
+    静的HTMLの保存内容には切り替え時点で表示されていた側のみが焼き付く。
+    日次・株数ベースのみ対応する。
+    売買代金セルは整数部と小数部の間にスペースが入る表示崩れがあるため除去してから解析する。
+    """
+    records = []
+    for cells in _parse_datatbl_rows(html):
+        if len(cells) < 8 or not _is_daily_date(cells[0]):
+            continue
+        records.append({
+            "date": _normalize_date(cells[0]),
+            "price": clean_numeric(cells[1]),
+            "price_change": clean_numeric(cells[2]),
+            "prime_trading_value": clean_numeric(cells[3].replace(" ", "")),
+            "buy_shares": clean_numeric(cells[4]),
+            "sell_shares": clean_numeric(cells[5]),
+            "net_shares": clean_numeric(cells[6]),
+            "net_change": clean_numeric(cells[7]),
+            "timestamp": datetime.now().isoformat(),
+        })
+    return records
+
+
+def sync_saitei(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
+    try:
+        html = fetch_page("SAITEI", session)
+    except requests.RequestException as e:
+        return {"success": False, "error": f"saitei.php の取得に失敗しました: {e}"}
+
+    records = parse_saitei(html)
+    if not records:
+        return {"success": False, "error": "saitei.php からデータ行を抽出できませんでした。"}
+
+    for rec in records:
+        nikkei_db.upsert_nikkei225jp_arbitrage(rec)
+
+    return {
+        "success": True,
+        "rows_saved": len(records),
+        "message": f"【裁定買い残/売り残】{records[0]['date']} 時点までの{len(records)}件を取り込みました。",
+    }
+
+
 def sync_per(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
     try:
         html = fetch_page("PER", session)
@@ -384,7 +433,7 @@ def sync_per(nikkei_db: NikkeiDatabase, session: requests.Session | None = None)
 
 
 def sync_all(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
-    """nikkei225jp.comの全6ページ(per/shutai/sinyou/karauri/touraku/nt)を同期する。"""
+    """nikkei225jp.comの全7ページ(per/shutai/sinyou/karauri/touraku/nt/saitei)を同期する。"""
     session = session or _session()
     return {
         "per": sync_per(nikkei_db, session),
@@ -393,4 +442,5 @@ def sync_all(nikkei_db: NikkeiDatabase, session: requests.Session | None = None)
         "karauri": sync_karauri(nikkei_db, session),
         "touraku": sync_touraku(nikkei_db, session),
         "nt": sync_nt(nikkei_db, session),
+        "saitei": sync_saitei(nikkei_db, session),
     }

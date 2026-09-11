@@ -124,6 +124,22 @@ NIKKEI225JP_NT_RATIO_COLUMNS = {
     "timestamp": "TEXT",
 }
 
+NIKKEI225JP_ARBITRAGE_COLUMNS = {
+    # nikkei225jp.com/data/saitei.php(裁定買い残／裁定売り残、日次・株数ベース)
+    # 裁定買い残(買いポジション)は将来の機械的な売り圧力(裁定解消売り)の目安。
+    # ページには週次(金額・億円)ビューもあるが、外部JSデータファイル依存で
+    # 静的HTMLに値が含まれないため未対応(日次・株数ベースのみ実装)。
+    "date": "TEXT PRIMARY KEY",
+    "price": "REAL",
+    "price_change": "REAL",
+    "prime_trading_value": "REAL",
+    "buy_shares": "REAL",
+    "sell_shares": "REAL",
+    "net_shares": "REAL",
+    "net_change": "REAL",
+    "timestamp": "TEXT",
+}
+
 JPX_MARGIN_POSITION_COLUMNS = {
     "date": "TEXT NOT NULL",
     "code": "TEXT NOT NULL",
@@ -215,6 +231,11 @@ class NikkeiDatabase:
             ensure_columns(conn, "nikkei225jp_nt_ratio", NIKKEI225JP_NT_RATIO_COLUMNS)
 
             conn.execute(
+                "CREATE TABLE IF NOT EXISTS nikkei225jp_arbitrage (date TEXT PRIMARY KEY)"
+            )
+            ensure_columns(conn, "nikkei225jp_arbitrage", NIKKEI225JP_ARBITRAGE_COLUMNS)
+
+            conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS jpx_margin_positions (
                     date TEXT NOT NULL,
@@ -304,6 +325,17 @@ class NikkeiDatabase:
         self, start_date: str | None = None, end_date: str | None = None
     ) -> list[sqlite3.Row]:
         return self._get_range("nikkei225jp_nt_ratio", start_date, end_date)
+
+    def upsert_nikkei225jp_arbitrage(self, record: dict) -> None:
+        self._upsert("nikkei225jp_arbitrage", NIKKEI225JP_ARBITRAGE_COLUMNS, ("date",), record)
+
+    def get_latest_nikkei225jp_arbitrage(self) -> sqlite3.Row | None:
+        return self._get_latest("nikkei225jp_arbitrage")
+
+    def get_nikkei225jp_arbitrage(
+        self, start_date: str | None = None, end_date: str | None = None
+    ) -> list[sqlite3.Row]:
+        return self._get_range("nikkei225jp_arbitrage", start_date, end_date)
 
     def get_nikkei_per_records(self, start_date: str | None = None, end_date: str | None = None) -> list[sqlite3.Row]:
         return self._get_range("nikkei_per_records", start_date, end_date)

@@ -659,6 +659,16 @@ def _format_nikkei_section(nikkei_db: NikkeiDatabase) -> str:
             f"※上昇=値がさ・輸出関連の値嵩株優位(大型株物色)、下降=TOPIX型・内需/中小型株優位への資金シフトの目安\n"
         )
 
+    arbitrage_line = ""
+    latest_arb = nikkei_db.get_latest_nikkei225jp_arbitrage()
+    if latest_arb and latest_arb["net_shares"] is not None:
+        arbitrage_line = (
+            f"- **裁定買い残-売り残差引 (株数ベース)**: {latest_arb['net_shares']:,.0f}千株 "
+            f"(買い残{(latest_arb['buy_shares'] or 0):,.0f}千株 / 売り残{(latest_arb['sell_shares'] or 0):,.0f}千株、基準日: {latest_arb['date']}) "
+            f"※裁定買い残(現物買い・先物売りの裁定ポジション)は将来の機械的な現物売り圧力(裁定解消売り)の潜在量。"
+            f"高水準なほど相場全体の上値が重くなりやすく、SQ(特別清算指数)前後で急変動しやすい\n"
+        )
+
     return f"""## 🌐 【前提】全体相場環境データ(日経平均・JPX公式需給データ)
 - **最新株価**: {lp_price:,.2f} 円 (基準日: {lp_date})
 - **PER**: {lp_per:.2f} 倍 (EPS: {lp_eps:,.2f} 円)
@@ -667,7 +677,7 @@ def _format_nikkei_section(nikkei_db: NikkeiDatabase) -> str:
 - **信用買い残 (東証全体)**: {lm_buy:,.1f} 億円 (基準日: {lm_date})
 - **信用売り残 (東証全体)**: {lm_sell:,.1f} 億円 (基準日: {lm_date})
 - **信用倍率 (東証全体)**: {lm_ratio:.2f} 倍
-{profit_loss_line}{nt_ratio_line}
+{profit_loss_line}{nt_ratio_line}{arbitrage_line}
 📈 直近の推移データ (過去の時系列トレンド)
 {trend_str}
 
