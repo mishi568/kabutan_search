@@ -221,6 +221,52 @@ def sync_sinyou(nikkei_db: NikkeiDatabase, session: requests.Session | None = No
     }
 
 
+def parse_karauri(html: str) -> list[dict]:
+    """karauri.php(空売り比率90営業日日本市況)を解析する。
+
+    列: 日付/日本225/変化/プライム売買代金(億円)/プライム出来高(百万株)/
+        空売り比率合計/空売り比率(価格規制あり)/空売り比率(価格規制なし)
+    価格・変化・売買代金セルは整数部と小数部の間にスペースが入る表示崩れがあるため
+    除去してから解析する。
+    """
+    records = []
+    for cells in _parse_datatbl_rows(html):
+        if len(cells) < 8 or not _is_daily_date(cells[0]):
+            continue
+        records.append({
+            "date": _normalize_date(cells[0]),
+            "price": clean_numeric(cells[1].replace(" ", "")),
+            "price_change": clean_numeric(cells[2].replace(" ", "")),
+            "prime_trading_value": clean_numeric(cells[3].replace(" ", "")),
+            "prime_volume": clean_numeric(cells[4]),
+            "short_ratio_total": clean_numeric(cells[5]),
+            "short_ratio_regulated": clean_numeric(cells[6]),
+            "short_ratio_non_regulated": clean_numeric(cells[7]),
+            "timestamp": datetime.now().isoformat(),
+        })
+    return records
+
+
+def sync_karauri(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
+    try:
+        html = fetch_page("KARAURI", session)
+    except requests.RequestException as e:
+        return {"success": False, "error": f"karauri.php の取得に失敗しました: {e}"}
+
+    records = parse_karauri(html)
+    if not records:
+        return {"success": False, "error": "karauri.php からデータ行を抽出できませんでした。"}
+
+    for rec in records:
+        nikkei_db.upsert_nikkei225jp_short_selling(rec)
+
+    return {
+        "success": True,
+        "rows_saved": len(records),
+        "message": f"【空売り比率(nikkei225jp.com)】{records[0]['date']} 時点までの{len(records)}件を取り込みました。",
+    }
+
+
 def sync_per(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
     try:
         html = fetch_page("PER", session)
@@ -242,10 +288,11 @@ def sync_per(nikkei_db: NikkeiDatabase, session: requests.Session | None = None)
 
 
 def sync_all(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
-    """nikkei225jp.comの全ページを同期する。touraku/karauri/ntは未実装。"""
+    """nikkei225jp.comの全ページを同期する。touraku/ntは未実装。"""
     session = session or _session()
     return {
         "per": sync_per(nikkei_db, session),
         "shutai": sync_shutai(nikkei_db, session),
         "sinyou": sync_sinyou(nikkei_db, session),
+        "karauri": sync_karauri(nikkei_db, session),
     }

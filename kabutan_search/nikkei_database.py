@@ -87,6 +87,20 @@ NIKKEI225JP_INVESTOR_TRENDS_COLUMNS = {
     "timestamp": "TEXT",
 }
 
+NIKKEI225JP_SHORT_SELLING_COLUMNS = {
+    # nikkei225jp.com/data/karauri.php(空売り比率90営業日日本市況)
+    # JPX公式のjpx_short_sellingを補完・裏取りするための別データ源。
+    "date": "TEXT PRIMARY KEY",
+    "price": "REAL",
+    "price_change": "REAL",
+    "prime_trading_value": "REAL",
+    "prime_volume": "REAL",
+    "short_ratio_total": "REAL",
+    "short_ratio_regulated": "REAL",
+    "short_ratio_non_regulated": "REAL",
+    "timestamp": "TEXT",
+}
+
 JPX_MARGIN_POSITION_COLUMNS = {
     "date": "TEXT NOT NULL",
     "code": "TEXT NOT NULL",
@@ -168,6 +182,11 @@ class NikkeiDatabase:
             ensure_columns(conn, "nikkei225jp_investor_trends", NIKKEI225JP_INVESTOR_TRENDS_COLUMNS)
 
             conn.execute(
+                "CREATE TABLE IF NOT EXISTS nikkei225jp_short_selling (date TEXT PRIMARY KEY)"
+            )
+            ensure_columns(conn, "nikkei225jp_short_selling", NIKKEI225JP_SHORT_SELLING_COLUMNS)
+
+            conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS jpx_margin_positions (
                     date TEXT NOT NULL,
@@ -233,6 +252,19 @@ class NikkeiDatabase:
         self, start_date: str | None = None, end_date: str | None = None
     ) -> list[sqlite3.Row]:
         return self._get_range("nikkei225jp_investor_trends", start_date, end_date)
+
+    def upsert_nikkei225jp_short_selling(self, record: dict) -> None:
+        self._upsert(
+            "nikkei225jp_short_selling", NIKKEI225JP_SHORT_SELLING_COLUMNS, ("date",), record
+        )
+
+    def get_latest_nikkei225jp_short_selling(self) -> sqlite3.Row | None:
+        return self._get_latest("nikkei225jp_short_selling")
+
+    def get_nikkei225jp_short_selling(
+        self, start_date: str | None = None, end_date: str | None = None
+    ) -> list[sqlite3.Row]:
+        return self._get_range("nikkei225jp_short_selling", start_date, end_date)
 
     def get_nikkei_per_records(self, start_date: str | None = None, end_date: str | None = None) -> list[sqlite3.Row]:
         return self._get_range("nikkei_per_records", start_date, end_date)

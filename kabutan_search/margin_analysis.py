@@ -539,6 +539,16 @@ def _format_jpx_section(nikkei_db: NikkeiDatabase) -> str:
     else:
         lines.append("- 空売り比率: データなし")
 
+    n225jp_short = nikkei_db.get_latest_nikkei225jp_short_selling()
+    if n225jp_short:
+        lines.append(
+            f"- **空売り比率(nikkei225jp.com版、上記JPX値の補完・裏取り用)**: "
+            f"合計{(n225jp_short['short_ratio_total'] or 0):.1f}% "
+            f"(価格規制あり{(n225jp_short['short_ratio_regulated'] or 0):.1f}% / "
+            f"価格規制なし{(n225jp_short['short_ratio_non_regulated'] or 0):.1f}%) "
+            f"(基準日: {n225jp_short['date']})"
+        )
+
     if investor_trends:
         lines.append(f"- **投資部門別売買動向** (基準日: {investor_trends['date']})")
         lines.append(f"  - 外国人: {(investor_trends['foreign_net'] or 0):+,.1f}億円")
