@@ -233,7 +233,10 @@ def _parse_and_save_pdf(db: Database, nikkei_db: NikkeiDatabase, path: Path) -> 
     if len(sector_rows) >= 25 or "-g" in filename or "業種" in all_text:
         sector_ratios = {}
         for i, r in enumerate(sector_rows):
-            sec_name = SECTOR_33_NAMES[i] if i < len(SECTOR_33_NAMES) else f"業種{i + 1}"
+            # PDFの1列目に実際の業種名が入っているのでそれを優先し、
+            # 万一欠けていた場合のみ標準33業種名リストの並び順にフォールバックする。
+            first_cell = (r[0] or "").strip() if r else ""
+            sec_name = first_cell if first_cell else (SECTOR_33_NAMES[i] if i < len(SECTOR_33_NAMES) else f"業種{i + 1}")
             pcts = [cell for cell in r if cell and "%" in str(cell)]
             if len(pcts) >= 3:
                 try:
