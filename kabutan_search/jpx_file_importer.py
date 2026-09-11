@@ -47,13 +47,15 @@ def import_file(db: Database, nikkei_db: NikkeiDatabase, filepath: str) -> dict:
             return _parse_and_save_pdf(db, nikkei_db, path)
 
         file_type = detect_file_type(path)
+        if file_type == "SHORT_POSITIONS":
+            return _parse_and_save_short_positions(nikkei_db, path)
         if file_type == "INVESTOR_TRENDS":
             return _parse_and_save_investor_trends(nikkei_db, path)
         if file_type == "SHORT_SELLING":
             return _parse_and_save_short_selling(db, nikkei_db, path)
         if file_type == "MARGIN_POSITIONS":
             return _parse_and_save_margin_positions(db, nikkei_db, path)
-        return {"success": False, "error": "JPXデータ(空売り集計、投資部門別売買状況、信用取引残高)の形式を自動判別できませんでした。"}
+        return {"success": False, "error": "JPXデータ(空売り集計、投資部門別売買状況、信用取引残高、空売り残高情報)の形式を自動判別できませんでした。"}
     except Exception as e:
         return {"success": False, "error": f"インポート処理中にエラーが発生しました: {e}"}
 
@@ -63,6 +65,8 @@ def detect_file_type(path: Path) -> str:
     filename = path.name.lower()
     ext = path.suffix.lower()
 
+    if "short_position" in filename or "空売り残高" in filename:
+        return "SHORT_POSITIONS"
     if any(k in filename for k in ["short", "karauri", "空売り", "-g.", "-m."]):
         return "SHORT_SELLING"
     if any(k in filename for k in ["stock_vol", "stock_val", "investor", "主体別", "部門別", "trends"]):
@@ -86,6 +90,8 @@ def detect_file_type(path: Path) -> str:
         except (ValueError, OSError):
             pass
 
+    if any(k in content_sample for k in ["空売り残高", "Outstanding Short Selling Positions", "空売り残高割合"]):
+        return "SHORT_POSITIONS"
     if any(k in content_sample for k in ["海外", "外国人", "個人", "信託", "Brokerage", "Investor Type", "Foreigners", "Individuals"]):
         return "INVESTOR_TRENDS"
     if any(k in content_sample for k in ["空売り", "規制", "Short Selling", "実線"]):
@@ -671,4 +677,78 @@ def _parse_and_save_margin_positions(db: Database, nikkei_db: NikkeiDatabase, pa
     return {
         "success": True, "file_type": "MARGIN_POSITIONS", "date": date_str, "rows_saved": len(margin_records),
         "message": f"【個別銘柄信用取引残高】{date_str} の信用残高データ(計{len(margin_records)}銘柄)を正常に取り込みました。",
+    }
+
+
+# ---------------------------------------------------------------------------
+# 空売り残高に関する情報 (機関投資家の個別銘柄空売りポジション、0.5%以上)
+# ---------------------------------------------------------------------------
+
+def _parse_and_save_short_positions(nikkei_db: NikkeiDatabase, path: Path) -> dict:
+    """空売り残高に関する情報(XLS/XLSX)を解析し、jpx_short_positionsへ保存する。
+
+    列構成(6行目=日本語ヘッダー、7行目=英語ヘッダー、8行目からデータ):
+    計算年月日/銘柄コード/銘柄名/(空)/商号・名称・氏名/住所/委託者...(略)/
+    空売り残高割合/空売り残高数量/空売り残高売買単位数/直近計算年月日/直近空売り残高割合/備考
+    """
+    try:
+        xl = pd.ExcelFile(path)
+        df = xl.parse(xl.sheet_names[0], header=None)
+    except (ValueError, OSError) as e:
+        return {"success": False, "error": f"Excelファイルの読み込みに失敗しました: {e}"}
+
+    disclosure_date = None
+    header_row = None
+    for r in range(min(15, len(df))):
+        row_str = " ".join(str(c) for c in df.iloc[r] if pd.notna(c))
+        if "公表年月日" in row_str:
+            for c in df.iloc[r]:
+                if pd.notna(c) and not isinstance(c, str):
+                    disclosure_date = _normalize_date(c)
+                    break
+        if "計算年月日" in row_str and "銘柄コード" in row_str:
+            header_row = r
+            break
+
+    if header_row is None:
+        return {"success": False, "error": "空売り残高情報の見出し行を検出できませんでした。"}
+
+    records = []
+    for r in range(header_row + 2, len(df)):  # +2でJP/EN見出し両方をスキップ
+        row = df.iloc[r]
+        if row.isna().all():
+            continue
+
+        calc_date = _normalize_date(row.iloc[1])
+        code_raw = row.iloc[2]
+        holder_raw = row.iloc[5]
+        ratio_raw = row.iloc[10]
+        shares_raw = row.iloc[11]
+
+        if pd.isna(code_raw) or pd.isna(holder_raw) or not calc_date:
+            continue
+
+        try:
+            code = str(int(code_raw))
+        except (ValueError, TypeError):
+            code = str(code_raw).strip()
+
+        records.append({
+            "date": calc_date,
+            "code": code,
+            "holder_name": str(holder_raw).strip(),
+            "short_position_ratio": round(float(ratio_raw) * 100, 4) if pd.notna(ratio_raw) else None,
+            "short_position_shares": float(shares_raw) if pd.notna(shares_raw) else None,
+            "disclosure_date": disclosure_date or calc_date,
+        })
+
+    if not records:
+        return {"success": False, "error": "空売り残高情報の有効なデータ行を抽出できませんでした。"}
+
+    for rec in records:
+        nikkei_db.upsert_jpx_short_position(rec)
+
+    return {
+        "success": True, "file_type": "SHORT_POSITIONS", "date": disclosure_date, "rows_saved": len(records),
+        "message": f"【空売り残高情報】{disclosure_date}(計{len(records)}件)の機関投資家別空売りポジションを正常に取り込みました。",
     }

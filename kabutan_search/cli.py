@@ -151,7 +151,7 @@ def cmd_jpx_sync(args: argparse.Namespace) -> None:
     db, nikkei_db = _databases(args)
     fetch_result = jpx_auto_syncer.sync_all(cache_dir=Path(args.cache_dir))
 
-    for key in ("short_selling", "margin_positions", "investor_trends"):
+    for key in ("short_selling", "margin_positions", "investor_trends", "short_positions"):
         sub = fetch_result[key]
         if not sub["success"]:
             print(f"{key}: 取得失敗 - {sub.get('error')}")

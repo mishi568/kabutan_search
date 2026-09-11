@@ -9,6 +9,7 @@ kabutan.jp/warning/?mode=9_1 と同様、JPX公式サイトから空売り集計
 ファイルパスをインポーターに渡す形で連結する想定。
 """
 import os
+import re
 import urllib.parse
 from pathlib import Path
 
@@ -20,6 +21,7 @@ JPX_URLS = {
     "SHORT_SELLING": "https://www.jpx.co.jp/markets/statistics-equities/short-selling/index.html",
     "MARGIN_POSITIONS": "https://www.jpx.co.jp/markets/statistics-equities/margin/index.html",
     "INVESTOR_TRENDS": "https://www.jpx.co.jp/markets/statistics-equities/investor-type/index.html",
+    "SHORT_POSITIONS": "https://www.jpx.co.jp/markets/public/short-selling/index.html",
 }
 
 USER_AGENT = (
@@ -127,8 +129,32 @@ def fetch_investor_trends_file(cache_dir: Path = DEFAULT_CACHE_DIR, session: req
     return {"success": True, "files": [str(path)]}
 
 
+def fetch_short_positions_file(cache_dir: Path = DEFAULT_CACHE_DIR, session: requests.Session | None = None) -> dict:
+    """空売り残高に関する情報(機関投資家の個別銘柄空売りポジション、0.5%以上)の最新ファイルを取得する。
+
+    ダウンロードURLの一部(添付ID)は日付から予測できないため、一覧ページをスキャンして
+    「YYYYMMDD_Short_Positions.xls」形式のリンクのうち最初のもの(最新日付)を採用する。
+    """
+    session = session or _session()
+    try:
+        links = _find_links(session, JPX_URLS["SHORT_POSITIONS"])
+    except requests.RequestException as e:
+        return {"success": False, "error": f"空売り残高情報ページの取得に失敗しました: {e}"}
+
+    position_url = next((u for u in links if re.search(r"\d{8}_Short_Positions\.xlsx?$", u, re.IGNORECASE)), None)
+    if not position_url:
+        return {"success": False, "error": "空売り残高情報の最新ファイルリンクが見つかりませんでした。"}
+
+    try:
+        path = _download_file(session, position_url, cache_dir)
+    except requests.RequestException as e:
+        return {"success": False, "error": f"空売り残高情報ファイルのダウンロードに失敗しました: {e}"}
+
+    return {"success": True, "files": [str(path)]}
+
+
 def sync_all(cache_dir: Path = DEFAULT_CACHE_DIR) -> dict:
-    """JPX公式サイトから3種類のデータファイルをすべてダウンロードする。
+    """JPX公式サイトから4種類のデータファイルをすべてダウンロードする。
 
     ファイルの中身の解析・DB取り込みは行わない(jpx_file_importer.py待ち)。
     """
@@ -137,6 +163,7 @@ def sync_all(cache_dir: Path = DEFAULT_CACHE_DIR) -> dict:
         "short_selling": fetch_short_selling_files(cache_dir, session),
         "margin_positions": fetch_margin_positions_file(cache_dir, session),
         "investor_trends": fetch_investor_trends_file(cache_dir, session),
+        "short_positions": fetch_short_positions_file(cache_dir, session),
     }
     result["success"] = any(r["success"] for r in result.values())
     return result
