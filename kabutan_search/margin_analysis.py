@@ -547,6 +547,23 @@ def _format_jpx_section(nikkei_db: NikkeiDatabase) -> str:
     else:
         lines.append("- 投資部門別売買動向: データなし")
 
+    n225jp_trends = nikkei_db.get_latest_nikkei225jp_investor_trends()
+    if n225jp_trends:
+        lines.append(
+            f"- **投資部門別売買動向(nikkei225jp.com版、週次、上記JPX値の補完・裏取り用)** (基準週: {n225jp_trends['date']})"
+        )
+        lines.append(f"  - 海外: {(n225jp_trends['foreign_net'] or 0):+,.1f}億円")
+        lines.append(
+            f"  - 個人計: {(n225jp_trends['individual_net'] or 0):+,.1f}億円 "
+            f"(現金: {(n225jp_trends['individual_cash_net'] or 0):+,.1f}億円 / "
+            f"信用: {(n225jp_trends['individual_margin_net'] or 0):+,.1f}億円)"
+        )
+        lines.append(f"  - 信託銀行: {(n225jp_trends['trust_bank_net'] or 0):+,.1f}億円")
+        lines.append(
+            f"  - 事業法人: {(n225jp_trends['business_corp_net'] or 0):+,.1f}億円 / "
+            f"投資信託: {(n225jp_trends['investment_trust_net'] or 0):+,.1f}億円"
+        )
+
     return "\n".join(lines)
 
 

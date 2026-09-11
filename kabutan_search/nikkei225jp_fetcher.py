@@ -8,6 +8,7 @@ kabutan.jpには一切アクセスしない。
 1列目が<time>タグの日付)を持つため、テーブル抽出自体は共通化し、列ごとの
 意味づけ(パース)だけをページ別に行う。
 """
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -53,7 +54,9 @@ def fetch_page(key: str, session: requests.Session | None = None) -> str:
 def _parse_datatbl_rows(html: str) -> list[list[str]]:
     """id="datatbl" テーブルのデータ行を、セルのテキストのリストとして返す(新しい日付順)。
 
-    ヘッダー行(<th>を含む行)は除外する。1列目は<time>タグ内の日付文字列。
+    ヘッダー行(<th>を含む行)は除外する(ページによってはヘッダーが複数箇所に
+    重複しているが、すべて<th>を含むのでまとめて除外される)。1列目は<time>タグ内
+    または素のテキストの日付文字列。セル内の改行・入れ子要素はスペース区切りで結合する。
     """
     soup = BeautifulSoup(html, "html.parser")
     table = soup.find(id="datatbl")
@@ -63,10 +66,34 @@ def _parse_datatbl_rows(html: str) -> list[list[str]]:
     for tr in table.find_all("tr"):
         if tr.find("th") is not None:
             continue
-        cells = [td.get_text(strip=True) for td in tr.find_all("td")]
+        cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
         if cells and cells[0]:
             rows.append(cells)
     return rows
+
+
+_DATE_CELL_RE = re.compile(r"^\d{4}[/-]\d{1,2}[/-]\d{1,2}$")
+
+
+def _is_daily_date(text: str) -> bool:
+    """"2026/09/04" のような日次日付セルか判定する("2026 年計" のような年間集計行を除外する)。"""
+    return bool(_DATE_CELL_RE.match(text))
+
+
+def _normalize_date(text: str) -> str:
+    """"2026/09/04" のようなスラッシュ区切りの日付をISO形式("2026-09-04")に正規化する。"""
+    return text.replace("/", "-")
+
+
+def _parse_weekly_change_pct(text: str) -> float | None:
+    """"▼ 2.09 %" のような週次変化率セルを符号付きの数値に変換する(▼=マイナス、−=ゼロ)。"""
+    m = re.search(r"([\d,]+\.?\d*)", text)
+    if not m:
+        return None
+    value = clean_numeric(m.group(1))
+    if value is None:
+        return None
+    return -value if "▼" in text else value
 
 
 def parse_per(html: str) -> list[dict]:
@@ -76,10 +103,10 @@ def parse_per(html: str) -> list[dict]:
     """
     records = []
     for cells in _parse_datatbl_rows(html):
-        if len(cells) < 11:
+        if len(cells) < 11 or not _is_daily_date(cells[0]):
             continue
         records.append({
-            "date": cells[0],
+            "date": _normalize_date(cells[0]),
             "price": clean_numeric(cells[1]),
             "per": clean_numeric(cells[4]),
             "pbr": clean_numeric(cells[5]),
@@ -91,6 +118,61 @@ def parse_per(html: str) -> list[dict]:
             "timestamp": datetime.now().isoformat(),
         })
     return records
+
+
+def _oku(value: float | None) -> float | None:
+    """百万円単位の値を億円単位に変換する(shutai.phpのデフォルト表示単位が百万円のため)。"""
+    return None if value is None else value / 100.0
+
+
+def parse_shutai(html: str) -> list[dict]:
+    """shutai.php(投資主体別売買状況、週次)を解析する。単位は百万円→億円に変換して保存する。
+
+    列: 日付/日本225/変化(週)/海外/証券自己/個人計/個人(現金)/個人(信用)/投資信託/
+        事業法人/その他法人/信託銀行/生保損保/都銀地銀
+    """
+    records = []
+    for cells in _parse_datatbl_rows(html):
+        if len(cells) < 14 or not _is_daily_date(cells[0]):
+            continue
+        records.append({
+            "date": _normalize_date(cells[0]),
+            "price": clean_numeric(cells[1]),
+            "price_change_pct": _parse_weekly_change_pct(cells[2]),
+            "foreign_net": _oku(clean_numeric(cells[3])),
+            "dealer_net": _oku(clean_numeric(cells[4])),
+            "individual_net": _oku(clean_numeric(cells[5])),
+            "individual_cash_net": _oku(clean_numeric(cells[6])),
+            "individual_margin_net": _oku(clean_numeric(cells[7])),
+            "investment_trust_net": _oku(clean_numeric(cells[8])),
+            "business_corp_net": _oku(clean_numeric(cells[9])),
+            "other_corp_net": _oku(clean_numeric(cells[10])),
+            "trust_bank_net": _oku(clean_numeric(cells[11])),
+            "insurance_net": _oku(clean_numeric(cells[12])),
+            "bank_net": _oku(clean_numeric(cells[13])),
+            "timestamp": datetime.now().isoformat(),
+        })
+    return records
+
+
+def sync_shutai(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
+    try:
+        html = fetch_page("SHUTAI", session)
+    except requests.RequestException as e:
+        return {"success": False, "error": f"shutai.php の取得に失敗しました: {e}"}
+
+    records = parse_shutai(html)
+    if not records:
+        return {"success": False, "error": "shutai.php からデータ行を抽出できませんでした。"}
+
+    for rec in records:
+        nikkei_db.upsert_nikkei225jp_investor_trends(rec)
+
+    return {
+        "success": True,
+        "rows_saved": len(records),
+        "message": f"【投資主体別売買状況(nikkei225jp.com)】{records[0]['date']} 週時点までの{len(records)}件を取り込みました。",
+    }
 
 
 def sync_per(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
@@ -114,6 +196,9 @@ def sync_per(nikkei_db: NikkeiDatabase, session: requests.Session | None = None)
 
 
 def sync_all(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
-    """nikkei225jp.comの全ページを同期する。現時点ではper.phpのみ実装済み。"""
+    """nikkei225jp.comの全ページを同期する。touraku/sinyou/karauri/ntは未実装。"""
     session = session or _session()
-    return {"per": sync_per(nikkei_db, session)}
+    return {
+        "per": sync_per(nikkei_db, session),
+        "shutai": sync_shutai(nikkei_db, session),
+    }

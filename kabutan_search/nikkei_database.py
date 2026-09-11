@@ -63,6 +63,26 @@ JPX_INVESTOR_TRENDS_COLUMNS = {
     "timestamp": "TEXT",
 }
 
+NIKKEI225JP_INVESTOR_TRENDS_COLUMNS = {
+    # nikkei225jp.com/data/shutai.php(投資主体別売買状況、週次、単位: 億円換算)
+    # JPX公式のjpx_investor_trendsを補完・裏取りするための別データ源。
+    "date": "TEXT PRIMARY KEY",
+    "price": "REAL",
+    "price_change_pct": "REAL",
+    "foreign_net": "REAL",
+    "dealer_net": "REAL",
+    "individual_net": "REAL",
+    "individual_cash_net": "REAL",
+    "individual_margin_net": "REAL",
+    "investment_trust_net": "REAL",
+    "business_corp_net": "REAL",
+    "other_corp_net": "REAL",
+    "trust_bank_net": "REAL",
+    "insurance_net": "REAL",
+    "bank_net": "REAL",
+    "timestamp": "TEXT",
+}
+
 JPX_MARGIN_POSITION_COLUMNS = {
     "date": "TEXT NOT NULL",
     "code": "TEXT NOT NULL",
@@ -139,6 +159,11 @@ class NikkeiDatabase:
             ensure_columns(conn, "jpx_investor_trends", JPX_INVESTOR_TRENDS_COLUMNS)
 
             conn.execute(
+                "CREATE TABLE IF NOT EXISTS nikkei225jp_investor_trends (date TEXT PRIMARY KEY)"
+            )
+            ensure_columns(conn, "nikkei225jp_investor_trends", NIKKEI225JP_INVESTOR_TRENDS_COLUMNS)
+
+            conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS jpx_margin_positions (
                     date TEXT NOT NULL,
@@ -191,6 +216,19 @@ class NikkeiDatabase:
 
     def upsert_nikkei_margin_record(self, record: dict) -> None:
         self._upsert("nikkei_margin_records", NIKKEI_MARGIN_RECORD_COLUMNS, ("date",), record)
+
+    def upsert_nikkei225jp_investor_trends(self, record: dict) -> None:
+        self._upsert(
+            "nikkei225jp_investor_trends", NIKKEI225JP_INVESTOR_TRENDS_COLUMNS, ("date",), record
+        )
+
+    def get_latest_nikkei225jp_investor_trends(self) -> sqlite3.Row | None:
+        return self._get_latest("nikkei225jp_investor_trends")
+
+    def get_nikkei225jp_investor_trends(
+        self, start_date: str | None = None, end_date: str | None = None
+    ) -> list[sqlite3.Row]:
+        return self._get_range("nikkei225jp_investor_trends", start_date, end_date)
 
     def get_nikkei_per_records(self, start_date: str | None = None, end_date: str | None = None) -> list[sqlite3.Row]:
         return self._get_range("nikkei_per_records", start_date, end_date)
