@@ -650,6 +650,15 @@ def _format_nikkei_section(nikkei_db: NikkeiDatabase) -> str:
             f"※信用買い方全体の含み損益率。大きくマイナスなほど追証・投げ売り圧力が蓄積している目安(逆張り的な反発の芽にもなり得る)\n"
         )
 
+    nt_ratio_line = ""
+    latest_nt = nikkei_db.get_latest_nikkei225jp_nt_ratio()
+    if latest_nt:
+        usdjpy_str = f", ドル円{latest_nt['usdjpy']:.2f}円" if latest_nt["usdjpy"] is not None else ""
+        nt_ratio_line = (
+            f"- **NT倍率(日経平均/TOPIX)**: {(latest_nt['nt_ratio'] or 0):.2f} (基準日: {latest_nt['date']}{usdjpy_str}) "
+            f"※上昇=値がさ・輸出関連の値嵩株優位(大型株物色)、下降=TOPIX型・内需/中小型株優位への資金シフトの目安\n"
+        )
+
     return f"""## 🌐 【前提】全体相場環境データ(日経平均・JPX公式需給データ)
 - **最新株価**: {lp_price:,.2f} 円 (基準日: {lp_date})
 - **PER**: {lp_per:.2f} 倍 (EPS: {lp_eps:,.2f} 円)
@@ -658,7 +667,7 @@ def _format_nikkei_section(nikkei_db: NikkeiDatabase) -> str:
 - **信用買い残 (東証全体)**: {lm_buy:,.1f} 億円 (基準日: {lm_date})
 - **信用売り残 (東証全体)**: {lm_sell:,.1f} 億円 (基準日: {lm_date})
 - **信用倍率 (東証全体)**: {lm_ratio:.2f} 倍
-{profit_loss_line}
+{profit_loss_line}{nt_ratio_line}
 📈 直近の推移データ (過去の時系列トレンド)
 {trend_str}
 

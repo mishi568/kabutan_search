@@ -315,6 +315,54 @@ def sync_touraku(nikkei_db: NikkeiDatabase, session: requests.Session | None = N
     }
 
 
+def parse_nt(html: str) -> list[dict]:
+    """nt.php(NT倍率 日本225・TOPIX・JPX400・ドル円)を解析する。
+
+    列: 日付/NT倍率/NJ倍率/JT倍率/日本225/日経%/TOPIX/TPX%/JPX400/JPX%/為替ドル円
+    NT倍率=日経平均/TOPIX、NJ倍率=日経平均/JPX400、JT倍率=JPX400/TOPIX。
+    為替ドル円は当日終値未確定時に空欄になることがある。
+    """
+    records = []
+    for cells in _parse_datatbl_rows(html):
+        if len(cells) < 11 or not _is_daily_date(cells[0]):
+            continue
+        records.append({
+            "date": _normalize_date(cells[0]),
+            "nt_ratio": clean_numeric(cells[1]),
+            "nj_ratio": clean_numeric(cells[2]),
+            "jt_ratio": clean_numeric(cells[3]),
+            "nikkei_price": clean_numeric(cells[4]),
+            "nikkei_change_pct": _parse_weekly_change_pct(cells[5]),
+            "topix_price": clean_numeric(cells[6]),
+            "topix_change_pct": _parse_weekly_change_pct(cells[7]),
+            "jpx400_price": clean_numeric(cells[8]),
+            "jpx400_change_pct": _parse_weekly_change_pct(cells[9]),
+            "usdjpy": clean_numeric(cells[10]),
+            "timestamp": datetime.now().isoformat(),
+        })
+    return records
+
+
+def sync_nt(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
+    try:
+        html = fetch_page("NT", session)
+    except requests.RequestException as e:
+        return {"success": False, "error": f"nt.php の取得に失敗しました: {e}"}
+
+    records = parse_nt(html)
+    if not records:
+        return {"success": False, "error": "nt.php からデータ行を抽出できませんでした。"}
+
+    for rec in records:
+        nikkei_db.upsert_nikkei225jp_nt_ratio(rec)
+
+    return {
+        "success": True,
+        "rows_saved": len(records),
+        "message": f"【NT倍率】{records[0]['date']} 時点までの{len(records)}件を取り込みました。",
+    }
+
+
 def sync_per(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
     try:
         html = fetch_page("PER", session)
@@ -336,7 +384,7 @@ def sync_per(nikkei_db: NikkeiDatabase, session: requests.Session | None = None)
 
 
 def sync_all(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
-    """nikkei225jp.comの全ページを同期する。ntは未実装。"""
+    """nikkei225jp.comの全6ページ(per/shutai/sinyou/karauri/touraku/nt)を同期する。"""
     session = session or _session()
     return {
         "per": sync_per(nikkei_db, session),
@@ -344,4 +392,5 @@ def sync_all(nikkei_db: NikkeiDatabase, session: requests.Session | None = None)
         "sinyou": sync_sinyou(nikkei_db, session),
         "karauri": sync_karauri(nikkei_db, session),
         "touraku": sync_touraku(nikkei_db, session),
+        "nt": sync_nt(nikkei_db, session),
     }

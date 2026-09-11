@@ -21,6 +21,15 @@ def generate_markdown_report(db: Database, nikkei_db: NikkeiDatabase, only_impro
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     lines = [f"# 需給分析レポート ({now_str})", "", f"対象銘柄数: {len(rows)}件", ""]
 
+    latest_nt = nikkei_db.get_latest_nikkei225jp_nt_ratio()
+    if latest_nt:
+        usdjpy_str = f"、ドル円 {latest_nt['usdjpy']:.2f}円" if latest_nt["usdjpy"] is not None else ""
+        lines.append("## 全体相場環境")
+        lines.append(
+            f"- NT倍率(日経平均/TOPIX): {(latest_nt['nt_ratio'] or 0):.2f} (基準日: {latest_nt['date']}{usdjpy_str})"
+        )
+        lines.append("")
+
     lines.append("## 銘柄別 需給分析")
     lines.append("| コード | 銘柄名 | 株価 | 25日乖離 | 28週騰落 | 信用倍率 | 28週変化率 | 踏み上げ | 総合評価 |")
     lines.append("| :--- | :--- | ---: | ---: | ---: | ---: | ---: | :---: | :--- |")
