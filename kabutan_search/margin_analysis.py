@@ -591,6 +591,7 @@ def _format_nikkei_section(nikkei_db: NikkeiDatabase) -> str:
     lm_buy = (latest_margin["margin_buy"] or 0.0) if latest_margin else 0.0
     lm_sell = (latest_margin["margin_sell"] or 0.0) if latest_margin else 0.0
     lm_ratio = (latest_margin["margin_ratio"] or 0.0) if latest_margin else 0.0
+    lm_profit_loss = latest_margin["profit_loss_ratio"] if latest_margin else None
 
     trend_lines = ["### 1. 日経平均株価 & PER 推移 (直近10営業日)"]
     if per_data:
@@ -611,9 +612,11 @@ def _format_nikkei_section(nikkei_db: NikkeiDatabase) -> str:
     trend_lines.append("### 3. 信用残高金額推移 (直近5週分)")
     if margin_data:
         for item in margin_data[-5:]:
+            pl_val = item["profit_loss_ratio"]
+            pl_str = f", 信用評価損益率 {pl_val:+.2f}%" if pl_val is not None else ""
             trend_lines.append(
                 f"- {item['date']}: 買い残 {(item['margin_buy'] or 0):,.1f}億円, 売り残 {(item['margin_sell'] or 0):,.1f}億円, "
-                f"倍率 {(item['margin_ratio'] or 0):.2f}倍 (終値: {(item['price'] or 0):,.2f}円)"
+                f"倍率 {(item['margin_ratio'] or 0):.2f}倍{pl_str} (終値: {(item['price'] or 0):,.2f}円)"
             )
     else:
         trend_lines.append("- データなし")
@@ -630,6 +633,13 @@ def _format_nikkei_section(nikkei_db: NikkeiDatabase) -> str:
             f"※プラス幅が大きいほど株式の相対的な割安感(バリュエーション上の下値サポート)が強い\n"
         )
 
+    profit_loss_line = ""
+    if lm_profit_loss is not None:
+        profit_loss_line = (
+            f"- **信用評価損益率 (東証全体)**: {lm_profit_loss:+.2f}% (基準日: {lm_date}) "
+            f"※信用買い方全体の含み損益率。大きくマイナスなほど追証・投げ売り圧力が蓄積している目安(逆張り的な反発の芽にもなり得る)\n"
+        )
+
     return f"""## 🌐 【前提】全体相場環境データ(日経平均・JPX公式需給データ)
 - **最新株価**: {lp_price:,.2f} 円 (基準日: {lp_date})
 - **PER**: {lp_per:.2f} 倍 (EPS: {lp_eps:,.2f} 円)
@@ -638,7 +648,7 @@ def _format_nikkei_section(nikkei_db: NikkeiDatabase) -> str:
 - **信用買い残 (東証全体)**: {lm_buy:,.1f} 億円 (基準日: {lm_date})
 - **信用売り残 (東証全体)**: {lm_sell:,.1f} 億円 (基準日: {lm_date})
 - **信用倍率 (東証全体)**: {lm_ratio:.2f} 倍
-
+{profit_loss_line}
 📈 直近の推移データ (過去の時系列トレンド)
 {trend_str}
 
