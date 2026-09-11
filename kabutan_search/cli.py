@@ -13,6 +13,7 @@ from . import (
     jpx_auto_syncer,
     jpx_file_importer,
     margin_analysis,
+    nikkei225jp_fetcher,
     report,
     screening,
     sector_data_manager,
@@ -171,6 +172,16 @@ def cmd_edinet_sync(args: argparse.Namespace) -> None:
         print(msg)
 
 
+def cmd_nikkei225_sync(args: argparse.Namespace) -> None:
+    _, nikkei_db = _databases(args)
+    result = nikkei225jp_fetcher.sync_all(nikkei_db)
+    for key, sub in result.items():
+        if sub["success"]:
+            print(f"  {sub['message']}")
+        else:
+            print(f"{key}: 取得失敗 - {sub.get('error')}", file=sys.stderr)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="kabutan", description="株探信用需給分析CLI")
     parser.add_argument("--db", default="kabutan_stock.db", help="kabutan_stock.dbのパス")
@@ -233,6 +244,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("edinet-sync", help="EDINET大量保有報告書を同期")
     p.add_argument("--api-key", help="EDINET APIキー(省略時は環境変数EDINET_API_KEY)")
     p.set_defaults(func=cmd_edinet_sync)
+
+    p = sub.add_parser("nikkei225-sync", help="nikkei225jp.comのマクロデータ(PER/PBR等)を同期")
+    p.set_defaults(func=cmd_nikkei225_sync)
 
     return parser
 

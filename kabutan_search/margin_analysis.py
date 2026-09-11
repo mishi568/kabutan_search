@@ -564,6 +564,9 @@ def _format_nikkei_section(nikkei_db: NikkeiDatabase) -> str:
     lp_per = (latest_per["per"] or 0.0) if latest_per else 0.0
     lp_pbr = (latest_per["pbr"] or 0.0) if latest_per else 0.0
     lp_eps = (latest_per["eps"] or 0.0) if latest_per else 0.0
+    lp_eyield = latest_per["earnings_yield"] if latest_per else None
+    lp_dyield = latest_per["dividend_yield"] if latest_per else None
+    lp_jgb = latest_per["jgb_yield"] if latest_per else None
 
     lt_r25 = (latest_touraku["touraku_25d"] or 0.0) if latest_touraku else 0.0
 
@@ -601,11 +604,20 @@ def _format_nikkei_section(nikkei_db: NikkeiDatabase) -> str:
     jpx_section_str = _format_jpx_section(nikkei_db)
     trend_str = "\n".join(trend_lines)
 
+    yield_spread_line = ""
+    if lp_eyield is not None and lp_jgb is not None:
+        spread = lp_eyield - lp_jgb
+        yield_spread_line = (
+            f"- **株式益回り-国債利回りスプレッド(イールドスプレッド)**: {spread:+.2f}pt "
+            f"(益回り{lp_eyield:.2f}% / 配当利回り{(lp_dyield or 0):.2f}% / 日本国債利回り{lp_jgb:.2f}%) "
+            f"※プラス幅が大きいほど株式の相対的な割安感(バリュエーション上の下値サポート)が強い\n"
+        )
+
     return f"""## 🌐 【前提】全体相場環境データ(日経平均・JPX公式需給データ)
 - **最新株価**: {lp_price:,.2f} 円 (基準日: {lp_date})
 - **PER**: {lp_per:.2f} 倍 (EPS: {lp_eps:,.2f} 円)
 - **PBR**: {lp_pbr:.2f} 倍
-- **騰落レシオ (25日)**: {lt_r25:.2f}%
+{yield_spread_line}- **騰落レシオ (25日)**: {lt_r25:.2f}%
 - **信用買い残 (東証全体)**: {lm_buy:,.1f} 億円 (基準日: {lm_date})
 - **信用売り残 (東証全体)**: {lm_sell:,.1f} 億円 (基準日: {lm_date})
 - **信用倍率 (東証全体)**: {lm_ratio:.2f} 倍

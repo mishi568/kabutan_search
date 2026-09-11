@@ -16,6 +16,10 @@ NIKKEI_PER_RECORD_COLUMNS = {
     "per": "REAL",
     "pbr": "REAL",
     "eps": "REAL",
+    "bps": "REAL",
+    "earnings_yield": "REAL",
+    "dividend_yield": "REAL",
+    "jgb_yield": "REAL",
     "timestamp": "TEXT",
 }
 
