@@ -23,18 +23,27 @@ def generate_markdown_report(db: Database, nikkei_db: NikkeiDatabase, only_impro
 
     latest_nt = nikkei_db.get_latest_nikkei225jp_nt_ratio()
     latest_arb = nikkei_db.get_latest_nikkei225jp_arbitrage()
-    if latest_nt or (latest_arb and latest_arb["net_shares"] is not None):
+    latest_fb = nikkei_db.get_latest_nikkei225jp_futures_broker()
+    has_arb = latest_arb and latest_arb["net_shares"] is not None
+    has_fb = latest_fb and latest_fb["foreign_net"] is not None
+    if latest_nt or has_arb or has_fb:
         lines.append("## 全体相場環境")
         if latest_nt:
             usdjpy_str = f"、ドル円 {latest_nt['usdjpy']:.2f}円" if latest_nt["usdjpy"] is not None else ""
             lines.append(
                 f"- NT倍率(日経平均/TOPIX): {(latest_nt['nt_ratio'] or 0):.2f} (基準日: {latest_nt['date']}{usdjpy_str})"
             )
-        if latest_arb and latest_arb["net_shares"] is not None:
+        if has_arb:
             lines.append(
                 f"- 裁定買い残-売り残差引: {latest_arb['net_shares']:,.0f}千株 "
                 f"(買い残{(latest_arb['buy_shares'] or 0):,.0f}千株 / 売り残{(latest_arb['sell_shares'] or 0):,.0f}千株、"
                 f"基準日: {latest_arb['date']})"
+            )
+        if has_fb:
+            lines.append(
+                f"- 日経225先物 外資系証券ネット建玉: {latest_fb['foreign_net']:+,.0f}枚 "
+                f"(買建{(latest_fb['foreign_buy'] or 0):,.0f} / 売建{(latest_fb['foreign_sell'] or 0):,.0f}、"
+                f"基準週: {latest_fb['date']})"
             )
         lines.append("")
 

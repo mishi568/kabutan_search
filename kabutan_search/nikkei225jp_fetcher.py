@@ -28,6 +28,7 @@ PAGE_URLS = {
     "TOURAKU": BASE_URL + "touraku.php",
     "NT": BASE_URL + "nt.php",
     "SAITEI": BASE_URL + "saitei.php",
+    "FUTURES": BASE_URL + "futures.php",
 }
 
 USER_AGENT = (
@@ -52,15 +53,15 @@ def fetch_page(key: str, session: requests.Session | None = None) -> str:
     return resp.text
 
 
-def _parse_datatbl_rows(html: str) -> list[list[str]]:
-    """id="datatbl" テーブルのデータ行を、セルのテキストのリストとして返す(新しい日付順)。
+def _parse_datatbl_rows(html: str, table_id: str = "datatbl") -> list[list[str]]:
+    """指定id(既定"datatbl")のテーブルのデータ行を、セルのテキストのリストとして返す(新しい日付順)。
 
     ヘッダー行(<th>を含む行)は除外する(ページによってはヘッダーが複数箇所に
     重複しているが、すべて<th>を含むのでまとめて除外される)。1列目は<time>タグ内
     または素のテキストの日付文字列。セル内の改行・入れ子要素はスペース区切りで結合する。
     """
     soup = BeautifulSoup(html, "html.parser")
-    table = soup.find(id="datatbl")
+    table = soup.find(id=table_id)
     if table is None:
         return []
     rows = []
@@ -412,6 +413,60 @@ def sync_saitei(nikkei_db: NikkeiDatabase, session: requests.Session | None = No
     }
 
 
+def parse_futures(html: str) -> list[dict]:
+    """futures.php(週次建玉数手口)の「週次サマリー」テーブル(id="sumTBL")を解析する。
+
+    列: 日付/日本225/変化/(外資系証券: 買建/売建/ネット/前週比)/
+        (国内系証券: 買建/売建/ネット/前週比)/(個人系ネット証券: 買建/売建/ネット/前週比)
+    外資系証券のネット建玉は海外機関投資家の先物ポジション方向を示す代表的な指標。
+    ページには個別証券会社別の建玉(最新週のみ)・価格帯別バイアスのテーブルもあるが、
+    時系列データではないため未対応(週次サマリーのみ実装)。
+    """
+    records = []
+    for cells in _parse_datatbl_rows(html, table_id="sumTBL"):
+        if len(cells) < 15 or not _is_daily_date(cells[0]):
+            continue
+        records.append({
+            "date": _normalize_date(cells[0]),
+            "price": clean_numeric(cells[1]),
+            "price_change": clean_numeric(cells[2]),
+            "foreign_buy": clean_numeric(cells[3]),
+            "foreign_sell": clean_numeric(cells[4]),
+            "foreign_net": clean_numeric(cells[5]),
+            "foreign_net_change": clean_numeric(cells[6]),
+            "domestic_buy": clean_numeric(cells[7]),
+            "domestic_sell": clean_numeric(cells[8]),
+            "domestic_net": clean_numeric(cells[9]),
+            "domestic_net_change": clean_numeric(cells[10]),
+            "retail_buy": clean_numeric(cells[11]),
+            "retail_sell": clean_numeric(cells[12]),
+            "retail_net": clean_numeric(cells[13]),
+            "retail_net_change": clean_numeric(cells[14]),
+            "timestamp": datetime.now().isoformat(),
+        })
+    return records
+
+
+def sync_futures(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
+    try:
+        html = fetch_page("FUTURES", session)
+    except requests.RequestException as e:
+        return {"success": False, "error": f"futures.php の取得に失敗しました: {e}"}
+
+    records = parse_futures(html)
+    if not records:
+        return {"success": False, "error": "futures.php からデータ行を抽出できませんでした。"}
+
+    for rec in records:
+        nikkei_db.upsert_nikkei225jp_futures_broker(rec)
+
+    return {
+        "success": True,
+        "rows_saved": len(records),
+        "message": f"【週次建玉数手口】{records[0]['date']} 時点までの{len(records)}件を取り込みました。",
+    }
+
+
 def sync_per(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
     try:
         html = fetch_page("PER", session)
@@ -433,7 +488,7 @@ def sync_per(nikkei_db: NikkeiDatabase, session: requests.Session | None = None)
 
 
 def sync_all(nikkei_db: NikkeiDatabase, session: requests.Session | None = None) -> dict:
-    """nikkei225jp.comの全7ページ(per/shutai/sinyou/karauri/touraku/nt/saitei)を同期する。"""
+    """nikkei225jp.comの全8ページ(per/shutai/sinyou/karauri/touraku/nt/saitei/futures)を同期する。"""
     session = session or _session()
     return {
         "per": sync_per(nikkei_db, session),
@@ -443,4 +498,5 @@ def sync_all(nikkei_db: NikkeiDatabase, session: requests.Session | None = None)
         "touraku": sync_touraku(nikkei_db, session),
         "nt": sync_nt(nikkei_db, session),
         "saitei": sync_saitei(nikkei_db, session),
+        "futures": sync_futures(nikkei_db, session),
     }

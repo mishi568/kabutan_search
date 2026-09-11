@@ -669,6 +669,16 @@ def _format_nikkei_section(nikkei_db: NikkeiDatabase) -> str:
             f"高水準なほど相場全体の上値が重くなりやすく、SQ(特別清算指数)前後で急変動しやすい\n"
         )
 
+    futures_broker_line = ""
+    latest_fb = nikkei_db.get_latest_nikkei225jp_futures_broker()
+    if latest_fb and latest_fb["foreign_net"] is not None:
+        futures_broker_line = (
+            f"- **日経225先物 週次建玉(外資系証券ネット)**: {latest_fb['foreign_net']:+,.0f}枚 "
+            f"(買建{(latest_fb['foreign_buy'] or 0):,.0f} / 売建{(latest_fb['foreign_sell'] or 0):,.0f}、基準週: {latest_fb['date']}) "
+            f"※海外機関投資家の先物ポジション方向。ネット売り(マイナス)が大きいほど海外勢が弱気(ヘッジ売り優勢)、"
+            f"ネット買いが大きいほど強気(先高観)の目安\n"
+        )
+
     return f"""## 🌐 【前提】全体相場環境データ(日経平均・JPX公式需給データ)
 - **最新株価**: {lp_price:,.2f} 円 (基準日: {lp_date})
 - **PER**: {lp_per:.2f} 倍 (EPS: {lp_eps:,.2f} 円)
@@ -677,7 +687,7 @@ def _format_nikkei_section(nikkei_db: NikkeiDatabase) -> str:
 - **信用買い残 (東証全体)**: {lm_buy:,.1f} 億円 (基準日: {lm_date})
 - **信用売り残 (東証全体)**: {lm_sell:,.1f} 億円 (基準日: {lm_date})
 - **信用倍率 (東証全体)**: {lm_ratio:.2f} 倍
-{profit_loss_line}{nt_ratio_line}{arbitrage_line}
+{profit_loss_line}{nt_ratio_line}{arbitrage_line}{futures_broker_line}
 📈 直近の推移データ (過去の時系列トレンド)
 {trend_str}
 

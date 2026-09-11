@@ -140,6 +140,28 @@ NIKKEI225JP_ARBITRAGE_COLUMNS = {
     "timestamp": "TEXT",
 }
 
+NIKKEI225JP_FUTURES_BROKER_COLUMNS = {
+    # nikkei225jp.com/data/futures.php(週次建玉数手口、日経225先物)
+    # 証券会社カテゴリ別(外資系/国内系/個人系ネット)の建玉(ポジション)推移。
+    # 外資系証券のネットは「海外機関投資家がどちらを向いているか」の目安。
+    "date": "TEXT PRIMARY KEY",
+    "price": "REAL",
+    "price_change": "REAL",
+    "foreign_buy": "REAL",
+    "foreign_sell": "REAL",
+    "foreign_net": "REAL",
+    "foreign_net_change": "REAL",
+    "domestic_buy": "REAL",
+    "domestic_sell": "REAL",
+    "domestic_net": "REAL",
+    "domestic_net_change": "REAL",
+    "retail_buy": "REAL",
+    "retail_sell": "REAL",
+    "retail_net": "REAL",
+    "retail_net_change": "REAL",
+    "timestamp": "TEXT",
+}
+
 JPX_MARGIN_POSITION_COLUMNS = {
     "date": "TEXT NOT NULL",
     "code": "TEXT NOT NULL",
@@ -234,6 +256,11 @@ class NikkeiDatabase:
                 "CREATE TABLE IF NOT EXISTS nikkei225jp_arbitrage (date TEXT PRIMARY KEY)"
             )
             ensure_columns(conn, "nikkei225jp_arbitrage", NIKKEI225JP_ARBITRAGE_COLUMNS)
+
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS nikkei225jp_futures_broker (date TEXT PRIMARY KEY)"
+            )
+            ensure_columns(conn, "nikkei225jp_futures_broker", NIKKEI225JP_FUTURES_BROKER_COLUMNS)
 
             conn.execute(
                 """
@@ -336,6 +363,19 @@ class NikkeiDatabase:
         self, start_date: str | None = None, end_date: str | None = None
     ) -> list[sqlite3.Row]:
         return self._get_range("nikkei225jp_arbitrage", start_date, end_date)
+
+    def upsert_nikkei225jp_futures_broker(self, record: dict) -> None:
+        self._upsert(
+            "nikkei225jp_futures_broker", NIKKEI225JP_FUTURES_BROKER_COLUMNS, ("date",), record
+        )
+
+    def get_latest_nikkei225jp_futures_broker(self) -> sqlite3.Row | None:
+        return self._get_latest("nikkei225jp_futures_broker")
+
+    def get_nikkei225jp_futures_broker(
+        self, start_date: str | None = None, end_date: str | None = None
+    ) -> list[sqlite3.Row]:
+        return self._get_range("nikkei225jp_futures_broker", start_date, end_date)
 
     def get_nikkei_per_records(self, start_date: str | None = None, end_date: str | None = None) -> list[sqlite3.Row]:
         return self._get_range("nikkei_per_records", start_date, end_date)
