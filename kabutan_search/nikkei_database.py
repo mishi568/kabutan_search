@@ -26,8 +26,14 @@ NIKKEI_PER_RECORD_COLUMNS = {
 NIKKEI_TOURAKU_RECORD_COLUMNS = {
     "date": "TEXT PRIMARY KEY",
     "price": "REAL",
+    "price_change": "REAL",
+    "prime_volume": "REAL",
+    "advancing_count": "REAL",
+    "declining_count": "REAL",
     "touraku_6d": "REAL",
+    "touraku_10d": "REAL",
     "touraku_10_12d": "REAL",
+    "touraku_15d": "REAL",
     "touraku_25d": "REAL",
     "timestamp": "TEXT",
 }
