@@ -191,12 +191,17 @@ def _parse_and_save_pdf(db: Database, nikkei_db: NikkeiDatabase, path: Path) -> 
             buy_shares = nums[3] if len(nums) > 3 else (nums[1] if len(nums) == 2 else 0.0)
             buy_change = nums[4] if len(nums) > 4 else 0.0
 
-            if len(nums) > 6 and nums[6] >= 0.0:
-                margin_ratio = nums[6]
-            elif sell_shares > 0:
-                margin_ratio = round(buy_shares / sell_shares, 2)
-            else:
-                margin_ratio = 0.0
+            # ETF/投資信託の行("J"区分)は通常株式("B"区分)と列構成が異なり、同じ位置指定では
+            # 崩れて負の残高になることがある。残高は本来非負のはずなので、その場合は行ごと捨てる
+            # (ETFは需給分析の対象外でもあるため、位置ずれを復元する必要はない)。
+            if sell_shares < 0 or buy_shares < 0:
+                continue
+
+            # 注意: nums[6]はPDF内の「取組比率」(売残÷買残×100の%値)であり、
+            # 本アプリの信用倍率(買残÷売残の倍率)とは定義が異なるため使わない。
+            # 売り残ゼロは「倍率0倍(踏み上げ材料あり)」ではなく「倍率不明(踏み上げ材料なし)」を
+            # 意味するため、0.0ではなくNoneにする(0.0だと誤って低倍率候補に紛れ込む)。
+            margin_ratio = round(buy_shares / sell_shares, 2) if sell_shares > 0 else None
 
             margin_records.append({
                 "date": date_str, "code": code, "name": db.get_stock_name(code) or f"銘柄{code}",
@@ -572,7 +577,8 @@ def _parse_and_save_margin_positions(db: Database, nikkei_db: NikkeiDatabase, pa
                 sell_change = nums[2] if len(nums) > 2 else 0.0
                 buy_change = nums[3] if len(nums) > 3 else 0.0
 
-        ratio = round(buy_shares / sell_shares, 2) if sell_shares > 0 else 0.0
+        # 売り残ゼロは「倍率不明(踏み上げ材料なし)」を意味するため0.0ではなくNoneにする
+        ratio = round(buy_shares / sell_shares, 2) if sell_shares > 0 else None
 
         margin_records.append({
             "date": date_str, "code": code, "name": name,
