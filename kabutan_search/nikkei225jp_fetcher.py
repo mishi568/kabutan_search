@@ -68,13 +68,17 @@ class Nikkei225jpSession:
 
     def get_html(self, url: str) -> str:
         try:
-            response = self._page.goto(url, wait_until="networkidle", timeout=PAGE_LOAD_TIMEOUT_MS)
+            # "networkidle"は広告・分析タグ等の常時通信があるページでは全通信が
+            # 止まる瞬間が来ず30秒でタイムアウトすることがあるため、"load"
+            # (主要リソースの読み込み完了)を使う。実データはこの時点で
+            # 概ね描画済みのため、後段の固定待機で十分。
+            response = self._page.goto(url, wait_until="load", timeout=PAGE_LOAD_TIMEOUT_MS)
         except PlaywrightError as e:
             raise FetchError(f"ページの読み込みに失敗しました: {e}") from e
         if response is not None and not response.ok:
             raise FetchError(f"HTTPエラー: status={response.status}")
         # document.write等の同期的なDOM書き込みが確実に終わるよう少し待つ
-        self._page.wait_for_timeout(500)
+        self._page.wait_for_timeout(1500)
         return self._page.content()
 
     def close(self) -> None:
