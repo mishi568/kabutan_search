@@ -12,6 +12,11 @@
      踏み上げ期待)銘柄。kabutan.jpに一切アクセスしない(要: 事前に `jpx-sync` コマンド)
   5. セクターランキング(sector_data_manager) + 既知の直近株価データ — 所属セクターが
      好調で、かつ既に把握している騰落率が高い銘柄
+  6. JPX公式の機関投資家空売りポジション(jpx_short_positions、0.5%ルール) — 複数機関
+     による空売り集中は将来の踏み上げ材料。kabutan.jpに一切アクセスしない(要: 事前に
+     `jpx-sync` コマンド)
+  7. EDINET大量保有報告書(edinet_large_holdings、5%ルール) — 直近の大口資金の動きを
+     検知。kabutan.jpに一切アクセスしない(要: 事前に `edinet-sync` コマンド)
 """
 from datetime import datetime
 
@@ -26,6 +31,10 @@ HOT_SECTOR_SIGNAL_RANKS = (1, 2)
 MIN_PRICE_CHANGE_PCT = 3.0
 # この倍率以下を「信用倍率が低い(売り長)」とみなす
 MAX_MARGIN_RATIO = 1.5
+# この合計比率(%)以上を「複数機関投資家の空売りが集中している」とみなす
+MIN_SHORT_POSITION_RATIO = 1.0
+# EDINET大量保有報告書を「直近」とみなす日数
+EDINET_RECENT_DAYS = 30
 
 
 def screen(
@@ -35,6 +44,8 @@ def screen(
     include_volume_surge: bool = True,
     include_margin_ranking: bool = True,
     include_low_margin_ratio: bool = True,
+    include_short_positions: bool = True,
+    include_large_holdings: bool = True,
 ) -> list[dict]:
     """当日の値上がり優位性候補を抽出し、candidate_stocksテーブルへ保存して返す。"""
     today = datetime.now().strftime("%Y-%m-%d")
@@ -119,6 +130,35 @@ def screen(
                 "code": code,
                 "screening_score": change_pct,
                 "reason": f"セクターモメンタム({latest['sector']}) + 騰落率{change_pct:+.1f}%",
+            }
+
+    # 6. JPX公式データ: 機関投資家空売りポジション集中(将来の踏み上げ材料)
+    if include_short_positions and nikkei_db is not None:
+        for pos in nikkei_db.get_short_positions_summary():
+            code = pos["code"]
+            if code in candidates:
+                continue
+            total_ratio = pos["total_ratio"]
+            if total_ratio is None or total_ratio < MIN_SHORT_POSITION_RATIO:
+                continue
+            candidates[code] = {
+                "code": code,
+                "screening_score": 400.0 * total_ratio,
+                "reason": f"機関投資家空売り集中(合計{total_ratio:.2f}%, {pos['holder_count']}社): 将来の踏み上げ材料",
+            }
+
+    # 7. EDINET大量保有報告書(直近の大口資金の動き)
+    if include_large_holdings and nikkei_db is not None:
+        for rec in nikkei_db.get_recent_large_holdings(days=EDINET_RECENT_DAYS):
+            code = rec["code"]
+            if code in candidates:
+                continue
+            ratio = rec["holding_ratio"]
+            ratio_str = f"{ratio:.2f}%" if ratio is not None else "--"
+            candidates[code] = {
+                "code": code,
+                "screening_score": 300.0 + (ratio or 0.0),
+                "reason": f"EDINET大量保有報告({rec['date']}, 保有割合{ratio_str}): 大口資金の動き",
             }
 
     for c in candidates.values():

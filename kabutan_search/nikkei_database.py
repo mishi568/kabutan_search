@@ -3,6 +3,7 @@
 SPECIFICATION.md 3.2 節のテーブル定義に対応する。
 """
 import sqlite3
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from .db_common import ensure_columns
@@ -292,3 +293,33 @@ class NikkeiDatabase:
         with self._connect() as conn:
             row = conn.execute("SELECT MAX(date) FROM edinet_large_holdings").fetchone()
             return row[0] if row else None
+
+    def get_recent_large_holdings(self, days: int = 30) -> list[sqlite3.Row]:
+        """直近days日以内に提出された大量保有報告書(EDINET)を返す"""
+        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        with self._connect() as conn:
+            return conn.execute(
+                "SELECT * FROM edinet_large_holdings WHERE date >= ? ORDER BY date DESC",
+                (cutoff,),
+            ).fetchall()
+
+    # -- 空売り残高(機関投資家の個別ポジション) --------------------------------
+
+    def get_latest_short_positions_date(self) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT MAX(date) FROM jpx_short_positions").fetchone()
+            return row[0] if row else None
+
+    def get_short_positions_summary(self, date: str | None = None) -> list[sqlite3.Row]:
+        """コード別の機関投資家空売りポジション集計(合計比率・保有機関数)を、
+        指定日(省略時は最新日)で返す"""
+        if date is None:
+            date = self.get_latest_short_positions_date()
+        if date is None:
+            return []
+        with self._connect() as conn:
+            return conn.execute(
+                "SELECT code, SUM(short_position_ratio) AS total_ratio, COUNT(*) AS holder_count "
+                "FROM jpx_short_positions WHERE date = ? GROUP BY code ORDER BY total_ratio DESC",
+                (date,),
+            ).fetchall()

@@ -667,10 +667,49 @@ def _format_data_row(row: dict, sector_signal_map: dict, sector_margin_map: dict
     )
 
 
-def _format_weekly_detail_block(row: dict) -> str:
-    weekly_records = row["weekly_records"]
-    if not weekly_records:
+def _format_institutional_note(nikkei_db: NikkeiDatabase, code: str) -> str:
+    """機関投資家空売りポジション(JPX、0.5%ルール)・EDINET大量保有報告(5%ルール)の要約を返す。
+
+    どちらもkabutan.jpにはない情報源で、`jpx-sync`/`edinet-sync`で事前に同期しておく必要がある。
+    データが無い銘柄は空文字を返す(セクション自体を省略する)。
+    """
+    short_positions = nikkei_db.get_jpx_short_positions(code)
+    large_holdings = nikkei_db.get_edinet_large_holdings(code)
+
+    lines = []
+    if short_positions:
+        latest_date = short_positions[-1]["date"]
+        latest_batch = [p for p in short_positions if p["date"] == latest_date]
+        total_ratio = sum(p["short_position_ratio"] or 0.0 for p in latest_batch)
+        holders = ", ".join(
+            f"{p['holder_name']}({(p['short_position_ratio'] or 0):.2f}%)" for p in latest_batch
+        )
+        lines.append(
+            f"- **機関投資家空売りポジション**(基準日: {latest_date}, 合計{total_ratio:.2f}%, {len(latest_batch)}社): {holders}"
+        )
+    if large_holdings:
+        top = large_holdings[0]
+        ratio = top["holding_ratio"]
+        ratio_str = f"{ratio:.2f}%" if ratio is not None else "--"
+        lines.append(
+            f"- **EDINET大量保有報告**(提出日: {top['submission_date']}): {top['holder_name']} "
+            f"保有割合{ratio_str} ({top['report_type'] or '--'})"
+        )
+
+    if not lines:
         return ""
+    return "\n".join(["#### 📌 機関投資家動向(JPX空売りポジション・EDINET大量保有報告)"] + lines)
+
+
+def _format_weekly_detail_block(row: dict, nikkei_db: NikkeiDatabase | None = None) -> str:
+    weekly_records = row["weekly_records"]
+    institutional_note = _format_institutional_note(nikkei_db, row["code"]) if nikkei_db is not None else ""
+
+    if not weekly_records:
+        if not institutional_note:
+            return ""
+        sector_disp = row.get("sector_disp") or row.get("sector") or "--"
+        return f"#### 【{row['code']}】{row['name']} ({sector_disp})\n\n{institutional_note}"
 
     sector_disp = row.get("sector_disp") or row.get("sector") or "--"
     lines = [
@@ -736,6 +775,10 @@ def _format_weekly_detail_block(row: dict) -> str:
 
         lines.append(f"| {d_str} | {p_str} | {price_chg_str} | {s_str} | {sell_chg_str} | {b_str} | {rat_str} | {med_rat_str} | {' '.join(flags)} |")
 
+    if institutional_note:
+        lines.append("")
+        lines.append(institutional_note)
+
     return "\n".join(lines)
 
 
@@ -761,7 +804,7 @@ def generate_ranking_prompt(
     sector_margin_section, sector_margin_map = _format_sector_margin_section(sec_margin_rows)
 
     data_rows = [_format_data_row(r, sector_signal_map, sector_margin_map) for r in rows]
-    weekly_detail_blocks = [b for b in (_format_weekly_detail_block(r) for r in rows) if b]
+    weekly_detail_blocks = [b for b in (_format_weekly_detail_block(r, nikkei_db) for r in rows) if b]
 
     data_table_str = "\n".join(data_rows)
     weekly_details_str = "\n\n".join(weekly_detail_blocks) if weekly_detail_blocks else "週次信用残の時系列詳細データなし"
@@ -800,6 +843,8 @@ def generate_ranking_prompt(
    - ⚠️ **`yutai_cross_suspected` (優待クロス疑い - 確定当月+倍率0.5倍以下)**: **【ランキングから除外】**
 9. **セクターモメンタム & 需給好転の追い風(参考情報)**:
    - 所属セクターの「Zスコア(モメンタム乖離)」や「セクター買残減少率(%)」は**参考情報として加味**してください。**個別銘柄固有の需給指標を最重視**し、セクター追い風だけで個別銘柄を過大評価しないでください。逆に、セクター全体が不調でも個別需給が優秀な銘柄は正当に評価してください。
+10. **機関投資家動向(JPX空売りポジション・EDINET大量保有報告、記載がある銘柄のみ)**:
+   - 各銘柄の週次詳細データ末尾に「📌 機関投資家動向」がある場合、それはkabutan.jpの信用残データとは別の情報源(JPXの0.5%以上空売りポジション開示、EDINETの5%以上大量保有報告書)です。複数機関投資家による空売りポジション集中は将来の踏み上げ材料として、大量保有報告書(特に直近の新規提出・保有割合増加)は大口資金の関心の高さを示す補強材料として、それぞれ加点評価に加味してください。記載が無い銘柄は単に情報源が無いだけであり、減点対象にはしないでください。
 
 思考の罠に陥らず、ステップバイステップで論理的に深く推論(Chain-of-Thought)した上で、客観的な数値根拠を元に結論を導き出してください。
 

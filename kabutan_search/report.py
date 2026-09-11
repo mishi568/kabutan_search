@@ -43,6 +43,19 @@ def generate_markdown_report(db: Database, nikkei_db: NikkeiDatabase, only_impro
             lines.append(f"| {s['sector_name']} | {chg:+.2f}% | {s['z_score']:+.2f} | {s['signal_badge']} |")
         lines.append("")
 
+    institutional_notes = []
+    for r in rows:
+        note = margin_analysis._format_institutional_note(nikkei_db, r["code"])
+        if note:
+            # _format_institutional_note()自身の見出し行を、銘柄コード付き見出しに差し替える
+            note_body = note.split("\n", 1)[1] if "\n" in note else ""
+            institutional_notes.append(f"### 【{r['code']}】{r['name']}\n{note_body}")
+    if institutional_notes:
+        lines.append("## 機関投資家動向(JPX空売りポジション・EDINET大量保有報告)")
+        lines.append("")
+        lines.append("\n\n".join(institutional_notes))
+        lines.append("")
+
     return "\n".join(lines)
 
 
